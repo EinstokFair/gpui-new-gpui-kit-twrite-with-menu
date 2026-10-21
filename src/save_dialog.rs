@@ -69,11 +69,6 @@ impl Render for SaveDialog {
             .size_full()
             .flex()
             .flex_col()
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" {
-                    this.close_window(window, cx, CloseReason::Cancel);
-                }
-            }))
             .on_action(cx.listener(|this, _: &CloseSaveDialog, window, cx| {
                 this.close_window(window, cx, CloseReason::Cancel);
             }))

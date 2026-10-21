@@ -40,11 +40,6 @@ impl Render for AboutWindow {
             .size_full()
             .flex()
             .flex_col()
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" {
-                    this.close(window, cx);
-                }
-            }))
             .on_action(cx.listener(|this, _: &CloseAbout, window, cx| {
                 this.close(window, cx);
             }))
