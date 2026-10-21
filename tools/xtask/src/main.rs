@@ -4,9 +4,7 @@ use std::process::Command;
 
 #[derive(Clone, Copy, Debug)]
 struct Mode {
-    /// true, если VENDOR_UPSTREAM_CACHE задана -> сеть запрещена без --update
     offline: bool,
-    /// true, если передан --update -> тащить всё новое из сети
     update: bool,
 }
 
@@ -54,7 +52,6 @@ fn resolve_cache() -> PathBuf {
         })
 }
 
-/// Обновить все клоны в кэше (git fetch origin) — для --update.
 fn update_all_clones(crates: &[toml_edit::Table], cache: &Path) -> Result<()> {
     let mut urls: std::collections::HashSet<String> = std::collections::HashSet::new();
     for c in crates {
@@ -77,7 +74,11 @@ fn update_all_clones(crates: &[toml_edit::Table], cache: &Path) -> Result<()> {
                     .status()
                     .with_context(|| format!("git fetch origin для {}", repo.display()))?;
                 if !st.success() {
-                    eprintln!("  ВНИМАНИЕ: git fetch origin вернул {} для {}", st, repo.display());
+                    eprintln!(
+                        "  ВНИМАНИЕ: git fetch origin вернул {} для {}",
+                        st,
+                        repo.display()
+                    );
                 }
             }
             None => {
@@ -330,7 +331,10 @@ fn cmd_expand(root: &Path, mode: Mode) -> Result<()> {
             continue;
         }
         if dst.exists() {
-            eprintln!("  ОШИБКА: {} существует, но Cargo.toml нет. Уберите вручную.", dst.display());
+            eprintln!(
+                "  ОШИБКА: {} существует, но Cargo.toml нет. Уберите вручную.",
+                dst.display()
+            );
             fail = true;
             continue;
         }
@@ -601,18 +605,165 @@ fn read_ws_tables(
     Ok((pkg, deps, lints))
 }
 
-fn toml_value_string(v: &toml_edit::Item) -> String {
+fn escape_toml_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn render_value(v: &toml_edit::Value) -> String {
     match v {
-        toml_edit::Item::Value(val) => val.to_string().trim().to_string(),
-        toml_edit::Item::Table(t) => {
-            let mut parts = Vec::new();
-            for (k, val) in t.iter() {
-                parts.push(format!("{k} = {}", toml_value_string(val)));
+        toml_edit::Value::String(s) => format!("\"{}\"", escape_toml_string(s.value())),
+        toml_edit::Value::InlineTable(it) => {
+            if it.is_empty() {
+                "{}".to_string()
+            } else {
+                let mut parts = Vec::new();
+                for (k, val) in it.iter() {
+                    parts.push(format!("{k} = {}", render_value(val)));
+                }
+                format!("{{ {} }}", parts.join(", "))
             }
-            format!("{{ {} }}", parts.join(", "))
         }
-        toml_edit::Item::ArrayOfTables(_) => String::new(),
-        toml_edit::Item::None => String::new(),
+        toml_edit::Value::Array(a) => {
+            let mut parts = Vec::new();
+            for val in a.iter() {
+                parts.push(render_value(val));
+            }
+            format!("[{}]", parts.join(", "))
+        }
+        _ => v.to_string().trim().to_string(),
+    }
+}
+
+fn render_item(v: &toml_edit::Item) -> Option<String> {
+    match v {
+        toml_edit::Item::Value(val) => Some(render_value(val)),
+        toml_edit::Item::Table(t) => {
+            if t.is_empty() {
+                None
+            } else {
+                let mut parts = Vec::new();
+                for (k, val) in t.iter() {
+                    if let Some(rendered) = render_item(val) {
+                        parts.push(format!("{k} = {rendered}"));
+                    }
+                }
+                if parts.is_empty() {
+                    None
+                } else {
+                    Some(format!("{{ {} }}", parts.join(", ")))
+                }
+            }
+        }
+        toml_edit::Item::ArrayOfTables(_) => None,
+        toml_edit::Item::None => None,
+    }
+}
+
+fn render_ws_dep(ws_dep: &toml_edit::Item) -> Option<String> {
+    if let toml_edit::Item::Value(toml_edit::Value::String(s)) = ws_dep {
+        return Some(format!(
+            "{{ version = \"{}\" }}",
+            escape_toml_string(s.value())
+        ));
+    }
+    render_item(ws_dep)
+}
+
+fn parse_extra(s: &str) -> Option<toml_edit::InlineTable> {
+    let synthetic = format!("x = {{ {} }}", s.trim().trim_matches(',').trim());
+    let doc: toml_edit::DocumentMut = synthetic.parse().ok()?;
+    doc.get("x").and_then(|i| i.as_inline_table()).cloned()
+}
+
+fn merge_ws_and_extra(
+    ws_dep: &toml_edit::Item,
+    extra: Option<&toml_edit::InlineTable>,
+) -> Option<String> {
+    if let toml_edit::Item::Value(toml_edit::Value::String(s)) = ws_dep {
+        match extra {
+            None => {
+                return Some(format!(
+                    "{{ version = \"{}\" }}",
+                    escape_toml_string(s.value())
+                ))
+            }
+            Some(extra_it) if extra_it.is_empty() => {
+                return Some(format!(
+                    "{{ version = \"{}\" }}",
+                    escape_toml_string(s.value())
+                ))
+            }
+            Some(extra_it) => {
+                let mut parts: Vec<String> = vec![format!(
+                    "version = \"{}\"",
+                    escape_toml_string(s.value())
+                )];
+                let mut seen: std::collections::HashSet<String> =
+                    std::collections::HashSet::from(["version".to_string()]);
+                for (k, v) in extra_it.iter() {
+                    if !seen.insert(k.to_string()) {
+                        continue;
+                    }
+                    parts.push(format!("{k} = {}", render_value(v)));
+                }
+                return Some(format!("{{ {} }}", parts.join(", ")));
+            }
+        }
+    }
+
+    let mut base: toml_edit::InlineTable = match ws_dep {
+        toml_edit::Item::Value(toml_edit::Value::InlineTable(it)) => it.clone(),
+        toml_edit::Item::Table(t) => {
+            let mut it = toml_edit::InlineTable::new();
+            for (k, v) in t.iter() {
+                if let Some(val) = v.as_value() {
+                    it.insert(k, val.clone());
+                }
+            }
+            it
+        }
+        _ => toml_edit::InlineTable::new(),
+    };
+
+    if let Some(extra_it) = extra {
+        for (k, v) in extra_it.iter() {
+            if k == "features" {
+                let mut merged: Vec<String> = Vec::new();
+                if let Some(existing) = base.get("features").and_then(|x| x.as_array()) {
+                    for f in existing.iter() {
+                        if let Some(s) = f.as_str() {
+                            merged.push(s.to_string());
+                        }
+                    }
+                }
+                if let Some(add) = v.as_array() {
+                    for f in add.iter() {
+                        if let Some(s) = f.as_str() {
+                            if !merged.iter().any(|x| x == s) {
+                                merged.push(s.to_string());
+                            }
+                        }
+                    }
+                }
+                let mut arr = toml_edit::Array::new();
+                for f in merged {
+                    arr.push(f);
+                }
+                base.insert("features", toml_edit::Value::Array(arr));
+            } else {
+                base.insert(k, v.clone());
+            }
+        }
+    }
+
+    if base.is_empty() {
+        None
+    } else {
+        let mut parts = Vec::new();
+        for (k, v) in base.iter() {
+            parts.push(format!("{k} = {}", render_value(v)));
+        }
+        Some(format!("{{ {} }}", parts.join(", ")))
     }
 }
 
@@ -640,10 +791,11 @@ fn expand_workspace_inheritance(crate_dir: &Path, root_cargo: &Path) -> Result<(
         ))?;
         if re.is_match(&text) {
             if let Some(v) = ws_pkg.get(field) {
-                let val = toml_value_string(v);
-                text = re
-                    .replace(&text, format!("{field} = {val}"))
-                    .to_string();
+                if let Some(val) = render_item(v) {
+                    text = re
+                        .replace(&text, format!("{field} = {val}"))
+                        .to_string();
+                }
             }
         }
     }
@@ -696,64 +848,16 @@ fn expand_workspace_inheritance(crate_dir: &Path, root_cargo: &Path) -> Result<(
                 let dep = &cap[2];
                 let rest = &cap[3];
                 if let Some(ws_dep) = ws_deps.get(dep) {
-                    let mut merged: toml_edit::Table = match ws_dep {
-                        toml_edit::Item::Value(toml_edit::Value::String(s)) => {
-                            let mut t = toml_edit::Table::new();
-                            t["version"] = toml_edit::value(s.value().as_str());
-                            t
-                        }
-                        toml_edit::Item::Value(toml_edit::Value::InlineTable(it)) => {
-                            let mut t = toml_edit::Table::new();
-                            for (k, v) in it.iter() {
-                                t[k] = toml_edit::Item::Value(v.clone());
-                            }
-                            t
-                        }
-                        toml_edit::Item::Table(t) => t.clone(),
-                        _ => toml_edit::Table::new(),
+                    let extra = if rest.trim().is_empty() {
+                        None
+                    } else {
+                        parse_extra(rest)
                     };
-                    if !rest.trim().is_empty() {
-                        let synthetic =
-                            format!("x = {{ {} }}", rest.trim().trim_matches(',').trim());
-                        if let Ok(extra_doc) = synthetic.parse::<toml_edit::DocumentMut>() {
-                            if let Some(extra_t) = extra_doc.get("x").and_then(|i| i.as_inline_table())
-                            {
-                                for (k, v) in extra_t.iter() {
-                                    if k == "features" {
-                                        let mut feats: Vec<String> = merged
-                                            .get("features")
-                                            .and_then(|i| i.as_array())
-                                            .map(|a| {
-                                                a.iter()
-                                                    .filter_map(|v| v.as_str().map(String::from))
-                                                    .collect()
-                                            })
-                                            .unwrap_or_default();
-                                        if let Some(a) = v.as_array() {
-                                            for f in a.iter().filter_map(|x| x.as_str()) {
-                                                if !feats.iter().any(|e| e == f) {
-                                                    feats.push(f.to_string());
-                                                }
-                                            }
-                                        }
-                                        if !feats.is_empty() {
-                                            let mut arr = toml_edit::Array::new();
-                                            for f in feats {
-                                                arr.push(f);
-                                            }
-                                            merged["features"] = toml_edit::value(arr);
-                                        }
-                                    } else {
-                                        merged[k] = toml_edit::Item::Value(v.clone());
-                                    }
-                                }
-                            }
-                        }
+                    if let Some(rendered) = merge_ws_and_extra(ws_dep, extra.as_ref()) {
+                        out.push(format!("{indent}{dep} = {rendered}"));
+                    } else {
+                        out.push(effective_line);
                     }
-                    out.push(format!(
-                        "{indent}{dep} = {}",
-                        toml_value_string(&toml_edit::Item::Table(merged))
-                    ));
                     i += 1;
                     continue;
                 }
@@ -766,9 +870,11 @@ fn expand_workspace_inheritance(crate_dir: &Path, root_cargo: &Path) -> Result<(
                 let indent = &cap[1];
                 let dep = &cap[2];
                 if let Some(ws_dep) = ws_deps.get(dep) {
-                    out.push(format!("{indent}{dep} = {}", toml_value_string(ws_dep)));
-                    i += 1;
-                    continue;
+                    if let Some(rendered) = render_ws_dep(ws_dep) {
+                        out.push(format!("{indent}{dep} = {rendered}"));
+                        i += 1;
+                        continue;
+                    }
                 }
             }
         }
@@ -790,7 +896,9 @@ fn expand_workspace_inheritance(crate_dir: &Path, root_cargo: &Path) -> Result<(
                 };
                 lints_text.push(format!("[lints.{section}]"));
                 for (rule, level) in rules_t.iter() {
-                    lints_text.push(format!("{rule} = {}", toml_value_string(level)));
+                    if let Some(rendered) = render_item(level) {
+                        lints_text.push(format!("{rule} = {rendered}"));
+                    }
                 }
                 lints_text.push(String::new());
             }
@@ -849,41 +957,36 @@ fn expand_workspace_sections(crate_dir: &Path, root_cargo: &Path) -> Result<()> 
             }
 
             let has_ws = body.iter().any(|l| l.trim() == "workspace = true");
-            let ws_dep = ws_deps.get(name);
-
-            if has_ws && ws_dep.is_some() {
-                let ws_dep = ws_dep.unwrap();
-                let rendered = match ws_dep {
-                    toml_edit::Item::Value(toml_edit::Value::String(s)) => {
-                        format!("version = \"{}\"", s.value())
-                    }
-                    _ => toml_value_string(ws_dep)
-                        .trim_matches(|c| c == '{' || c == '}')
-                        .trim()
-                        .to_string(),
-                };
-                let header_kind = if prefix.is_empty() {
-                    format!("[{kind}]")
-                } else {
-                    format!("[{prefix}.{kind}]")
-                };
-                out.push(header_kind);
-                let mut inline = format!("{name} = {{ {rendered} }}");
-                for l in &body {
-                    let s = l.trim();
-                    if s == "workspace = true" || s.is_empty() {
-                        continue;
-                    }
-                    if let Some((_k, _)) = s.split_once('=') {
-                        if inline.ends_with('}') {
-                            inline = format!("{}, {s} }}", &inline[..inline.len() - 2]);
+            if has_ws {
+                if let Some(ws_dep) = ws_deps.get(name) {
+                    let mut extras: Vec<String> = Vec::new();
+                    for l in &body {
+                        let s = l.trim();
+                        if s == "workspace = true" || s.is_empty() {
+                            continue;
+                        }
+                        if s.contains('=') {
+                            extras.push(s.to_string());
                         }
                     }
+                    let extra_inline = if extras.is_empty() {
+                        None
+                    } else {
+                        parse_extra(&extras.join(", "))
+                    };
+                    if let Some(rendered) = merge_ws_and_extra(ws_dep, extra_inline.as_ref()) {
+                        let header_kind = if prefix.is_empty() {
+                            format!("[{kind}]")
+                        } else {
+                            format!("[{prefix}.{kind}]")
+                        };
+                        out.push(header_kind);
+                        out.push(format!("{name} = {rendered}"));
+                        i = j;
+                        changed = true;
+                        continue;
+                    }
                 }
-                out.push(inline);
-                i = j;
-                changed = true;
-                continue;
             }
             out.push(line);
             i += 1;
@@ -1066,11 +1169,21 @@ fn fix_crates_paths(manifest: &Path, vendor: &Path) -> Result<()> {
         if let Some(cap) = re.captures(line) {
             let raw = &cap[1];
             let leaf = raw.rsplit('/').next().unwrap_or(raw);
-            let cand = vendor.join(format!("{leaf}-local"));
-            let replacement = if cand.is_dir() {
-                format!(r#"path = "../{leaf}-local""#)
-            } else {
-                String::new()
+            // Пробуем оба варианта: <leaf>-local и <leaf.replace('_','-')>-local
+            let candidates = [
+                format!("{leaf}-local"),
+                format!("{}-local", leaf.replace('_', "-")),
+            ];
+            let mut found: Option<String> = None;
+            for cand_name in &candidates {
+                if vendor.join(cand_name).is_dir() {
+                    found = Some(cand_name.clone());
+                    break;
+                }
+            }
+            let replacement = match found {
+                Some(cand_name) => format!(r#"path = "../{cand_name}""#),
+                None => String::new(), // снимаем path, если каталога нет
             };
             let new_line = re.replace(line, replacement.as_str()).to_string();
             if new_line != line {
