@@ -1,0 +1,61 @@
+name: Rust Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # 1. Установка системных зависимостей (из раздела Requirements)
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential git curl \
+          libwayland-dev libxkbcommon-dev libx11-dev libxcb1-dev \
+          libfontconfig1-dev libfreetype6-dev \
+          libvulkan-dev libegl1-mesa-dev libgles2-mesa-dev \
+          libasound2-dev
+
+    # 2. Установка Rust (стабильная версия)
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+
+    # 3. Кэширование Cargo (ускоряет сборку)
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    # 4. Восстановление vendor/ (шаг из Quick start)
+    # Используем кэш для ~/.cache, чтобы не клонировать заново при каждом запуске
+    - name: Cache Upstream Dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/gpui-editors-upstream
+        key: ${{ runner.os }}-gpui-upstream-${{ hashFiles('vendor-upstream/manifest.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-gpui-upstream-
+
+    - name: Restore vendor
+      run: |
+        chmod +x tools/vendor.sh
+        tools/vendor.sh
+
+    # 5. Сборка (из Quick start)
+    - name: Build Release
+      run: cargo build --release
+
+    # Опционально: запуск тестов, если они есть
+    # - name: Run tests
+    #   run: cargo test --release
