@@ -16,7 +16,7 @@ use save_dialog::{CloseSaveDialog, SaveDialog};
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PendingAction { New, Open }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SaveResult { ProceedToAction, DiscardAndProceed }
 use settings::ThemeKind;
 
@@ -82,6 +82,7 @@ struct RootView {
     quit_after_save: bool,
     pending_action: Option<PendingAction>,
     pending_save_result: Option<SaveResult>,
+    root_window_handle: Option<gpui::AnyWindowHandle>,
 }
 
 fn light_editor_theme() -> EditorTheme {
@@ -163,6 +164,7 @@ impl RootView {
             quit_after_save: false,
             pending_action: None,
             pending_save_result: None,
+            root_window_handle: None,
         }
     }
 
@@ -221,20 +223,58 @@ impl RootView {
         let root_weak = cx.entity().downgrade();
         gpui_kit::open_window(options, cx, move |window, cx| {
             let root_weak_save = root_weak.clone();
+            let root_weak_save_drain = root_weak.clone();
             let root_weak_discard = root_weak.clone();
+            let root_weak_discard_drain = root_weak.clone();
             let on_save: Box<dyn Fn(&mut Window, &mut App) + 'static> =
                 Box::new(move |_w, app| {
-                    let _ = root_weak_save.update(app, |root, cx| {
-                        root.pending_save_result = Some(SaveResult::ProceedToAction);
-                        cx.notify();
-                    });
+                    // 1. Установить флаг и прочитать handle — один borrow app.
+                    let handle_opt = {
+                        let mut out = None;
+                        let _ = root_weak_save.update(app, |root, cx| {
+                            root.pending_save_result = Some(SaveResult::ProceedToAction);
+                            out = root.root_window_handle;
+                            cx.notify();
+                        });
+                        out
+                    };
+                    // 2. Дренаж — app свободен.
+                    if let Some(handle) = handle_opt {
+                        let weak = root_weak_save_drain.clone();
+                        let _ = handle.update(app, |_r, window, app3| {
+                            if let Some(e) = weak.upgrade() {
+                                let _ = e.update(app3, |root3, cx3| {
+                                    if let Some(result) = root3.pending_save_result.take() {
+                                        root3.handle_save_result(result, window, cx3);
+                                    }
+                                });
+                            }
+                        });
+                    }
                 });
             let on_discard: Box<dyn Fn(&mut Window, &mut App) + 'static> =
                 Box::new(move |_w, app| {
-                    let _ = root_weak_discard.update(app, |root, cx| {
-                        root.pending_save_result = Some(SaveResult::DiscardAndProceed);
-                        cx.notify();
-                    });
+                    let handle_opt = {
+                        let mut out = None;
+                        let _ = root_weak_discard.update(app, |root, cx| {
+                            root.pending_save_result = Some(SaveResult::DiscardAndProceed);
+                            out = root.root_window_handle;
+                            cx.notify();
+                        });
+                        out
+                    };
+                    if let Some(handle) = handle_opt {
+                        let weak = root_weak_discard_drain.clone();
+                        let _ = handle.update(app, |_r, window, app3| {
+                            if let Some(e) = weak.upgrade() {
+                                let _ = e.update(app3, |root3, cx3| {
+                                    if let Some(result) = root3.pending_save_result.take() {
+                                        root3.handle_save_result(result, window, cx3);
+                                    }
+                                });
+                            }
+                        });
+                    }
                 });
             cx.new(|cx| SaveDialog::new(window, cx, on_save, on_discard))
         })
@@ -260,6 +300,7 @@ impl RootView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        eprintln!("handle_save_result: {:?}", result);
         match result {
             SaveResult::ProceedToAction => {
                 // "Сохранить": выполняем on_save в контексте редактора.
@@ -392,9 +433,11 @@ impl RootView {
     }
 
     fn on_save(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
+        eprintln!("on_save: current_file = {:?}", self.current_file);
         if let Some(path) = &self.current_file {
             let text = self.get_text(cx);
             if let Err(e) = std::fs::write(path, text) {
+                eprintln!("on_save: write error {:?}", e);
                 use gpui_kit::component::notification::Notification;
                 window.push_notification(
                     Notification::error(format!("Ошибка сохранения: {}", e)),
@@ -571,9 +614,6 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(result) = self.pending_save_result.take() {
-            self.handle_save_result(result, _window, cx);
-        }
         let dirty = self.is_dirty(cx);
         let title = match (&self.current_file, dirty) {
             (Some(p), true) => format!("* {} — Редактор TWrite", p.to_string_lossy()),
@@ -640,6 +680,7 @@ impl Render for RootView {
             )
     }
 }
+
 
 fn main() {
     gpui_kit::application()
@@ -734,10 +775,14 @@ fn main() {
                 ..Default::default()
             };
 
-            gpui_kit::open_window(options, cx, |window, cx| {
+            let (root_handle, root_entity) = gpui_kit::open_window(options, cx, |window, cx| {
                 cx.new(|cx| RootView::new(window, cx))
             })
             .expect("Не удалось открыть окно");
+            root_entity.update(cx, |root, cx| {
+                root.root_window_handle = Some(root_handle);
+                cx.notify();
+            });
 
             cx.activate(true);
         });
