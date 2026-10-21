@@ -26,15 +26,6 @@ use settings::ThemeKind;
 struct Quit;
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
 #[action(namespace = my_editor, no_json)]
-struct QuitSave;
-#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
-#[action(namespace = my_editor, no_json)]
-struct QuitDiscard;
-#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
-#[action(namespace = my_editor, no_json)]
-struct QuitCancel;
-#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
-#[action(namespace = my_editor, no_json)]
 struct About;
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
 #[action(namespace = my_editor, no_json)]
@@ -589,18 +580,8 @@ impl RootView {
         self.request_quit(window, cx);
     }
 
-    fn on_quit_save(&mut self, _: &QuitSave, window: &mut Window, cx: &mut Context<Self>) {
-        self.quit_after_save = true;
-        self.on_save(&SaveFile, window, cx);
-    }
 
-    fn on_quit_discard(&mut self, _: &QuitDiscard, _window: &mut Window, cx: &mut Context<Self>) {
-        cx.quit();
-    }
 
-    fn on_quit_cancel(&mut self, _: &QuitCancel, _window: &mut Window, _cx: &mut Context<Self>) {
-        self.quit_after_save = false;
-    }
 
     fn on_about(&mut self, _: &About, _window: &mut Window, cx: &mut Context<Self>) {
         let bounds = Bounds::centered(None, size(px(400.), px(200.)), cx);
@@ -655,9 +636,6 @@ impl Render for RootView {
             .on_action(cx.listener(Self::on_set_dark_theme))
             .key_context("RootView")
             .on_action(cx.listener(Self::on_quit))
-            .on_action(cx.listener(Self::on_quit_save))
-            .on_action(cx.listener(Self::on_quit_discard))
-            .on_action(cx.listener(Self::on_quit_cancel))
             .on_action(cx.listener(Self::on_about))
             .child(
                 TitleBar::new()
