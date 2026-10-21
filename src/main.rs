@@ -254,7 +254,15 @@ impl RootView {
                     });
                 }
             }
-            Ok(Err(err)) => println!("Ошибка выбора файла: {}", err),
+            Ok(Err(err)) => {
+                use gpui_kit::component::notification::Notification;
+                _ = this.update_in(cx, |_this, window, cx| {
+                    window.push_notification(
+                        Notification::error(format!("Ошибка выбора файла: {}", err)),
+                        cx,
+                    );
+                });
+            }
             _ => {}
         })
         .detach();
@@ -311,9 +319,12 @@ impl RootView {
         if let Some(path) = &self.current_file {
             let text = self.get_text(cx);
             if let Err(e) = std::fs::write(path, text) {
-                println!("Ошибка сохранения: {}", e);
+                use gpui_kit::component::notification::Notification;
+                window.push_notification(
+                    Notification::error(format!("Ошибка сохранения: {}", e)),
+                    cx,
+                );
             } else {
-                println!("Сохранено: {:?}", path);
                 self.saved_version = self.editor.read(cx).buffer.version();
                 if self.quit_after_save {
                     cx.quit();
@@ -341,18 +352,29 @@ impl RootView {
                 _ = this.update_in(cx, |this, _window, cx| {
                     let text = this.get_text(cx);
                     if let Err(e) = std::fs::write(&path, text) {
-                        println!("Ошибка сохранения: {}", e);
+                        use gpui_kit::component::notification::Notification;
+                        _window.push_notification(
+                            Notification::error(format!("Ошибка сохранения: {}", e)),
+                            cx,
+                        );
                     } else {
                         this.current_file = Some(path);
                         this.saved_version = this.editor.read(cx).buffer.version();
-                        println!("Сохранено как: {:?}", this.current_file);
                         if this.quit_after_save {
                             cx.quit();
                         }
                     }
                 });
             }
-            Ok(Err(err)) => println!("Ошибка выбора файла: {}", err),
+            Ok(Err(err)) => {
+                use gpui_kit::component::notification::Notification;
+                _ = this.update_in(cx, |_this, window, cx| {
+                    window.push_notification(
+                        Notification::error(format!("Ошибка выбора файла: {}", err)),
+                        cx,
+                    );
+                });
+            }
             _ => {}
         })
         .detach();

@@ -41,7 +41,7 @@ impl Render for SaveDialog {
             .size_full()
             .flex()
             .flex_col()
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, _cx| {
                 if event.keystroke.key == "escape" {
                     this.close_window(window);
                 }
@@ -72,6 +72,8 @@ impl Render for SaveDialog {
                     .child(
                         div()
                             .text_base()
+                            .px_6()
+                            .text_center()
                             .child("В документе есть несохранённые изменения. Сохранить перед выходом?")
                     )
                     .child(
