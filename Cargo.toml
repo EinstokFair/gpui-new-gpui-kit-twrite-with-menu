@@ -19,3 +19,5 @@ gpui = { path = "vendor/gpui-local" }
 gpui-pre = { path = "vendor/gpui-pre-local" }
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 gpui-base = { path = "vendor/gpui-base-local" }
+gpui-kit-assets = { path = "vendor/assets-local" }
+gpui-component = { path = "vendor/component-local" }

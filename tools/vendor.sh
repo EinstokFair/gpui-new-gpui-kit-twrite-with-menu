@@ -177,13 +177,16 @@ def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
         "gpui_linux": "gpui-pre-linux",
         "gpui_macros": "gpui-macros-local",
         "gpui-base": "gpui-base-local",
+        "base": "gpui-base-local",
         "twrite-core": "twrite-core-local",
         "twrite-gpui": "twrite-gpui-local",
     }
 
     def repl(m):
         nonlocal changed
-        prefix, name = m.group(1), m.group(2)
+        prefix, raw_path = m.group(1), m.group(2)
+        # R3: если в path есть / — берём последний компонент
+        name = raw_path.rsplit("/", 1)[-1]
         if name.endswith("-local"):
             return m.group(0)
         # 1) явный алиас
@@ -200,7 +203,7 @@ def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
                 return f'{prefix}"../{cand_name}"'
         return m.group(0)
 
-    new_text = re.sub(r'(\bpath\s*=\s*)"crates/([\w-]+)"', repl, text)
+    new_text = re.sub(r'(\bpath\s*=\s*)"crates/([\w/-]+)"', repl, text)
 
 
     if changed:
@@ -435,3 +438,6 @@ PY
 
 echo ""
 echo "OK: vendor/ восстановлен."
+
+# Пост-процессинг vendor/: идемпотентные правки манифестов после восстановления.
+python3 "$SCRIPT_DIR/vendor-postprocess.py"
