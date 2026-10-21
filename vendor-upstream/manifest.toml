@@ -1,6 +1,8 @@
 # vendor-upstream/manifest.toml
-# Описывает, откуда брать 8 локальных крейтов в vendor/.
-# Только git — никакого crates.io.
+# Описывает, откуда брать локальные крейты в vendor/.
+# Источники: git (snapshot zed@93d7456), generated (generate/*.sh).
+# Число секций [[crate]] меняется: tools/vendor-close.sh дописывает
+# недостающие upstream-крейты автоматически.
 
 # --- gpui-pre (snapshot zed@93d7456) ---
 [[crate]]
