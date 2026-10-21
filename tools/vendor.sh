@@ -95,12 +95,24 @@ def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
     text = crate_cargo.read_text()
     changed = False
 
+    # Явные алиасы: upstream-имя -> локальное имя в vendor/ (если не совпадает с <name>-local)
+    aliases = {
+        "gpui": "gpui-pre-local",
+        "twrite-core": "twrite-core-local",
+        "twrite-gpui": "twrite-gpui-local",
+    }
+
     def repl(m):
         nonlocal changed
         prefix, name = m.group(1), m.group(2)
-        # уже local? (../<name>-local) — не трогаем
         if name.endswith("-local"):
             return m.group(0)
+        # 1) явный алиас
+        target = aliases.get(name)
+        if target and (vendor_dir / target).is_dir() and (vendor_dir / target / "Cargo.toml").exists():
+            changed = True
+            return f'{prefix}path = "../{target}"'
+        # 2) <name>-local
         candidate = vendor_dir / f"{name}-local"
         if candidate.is_dir() and (candidate / "Cargo.toml").exists():
             changed = True
@@ -109,10 +121,6 @@ def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
 
     new_text = re.sub(r'(\bpath\s*=\s*)"crates/([\w-]+)"', repl, text)
 
-    # Спецслучай: gpui -> gpui-pre-local (имя каталога не совпадает с <name>-local)
-    if "path = \"crates/gpui\"" in new_text and (vendor_dir / "gpui-pre-local").is_dir():
-        new_text = new_text.replace('path = "crates/gpui"', 'path = "../gpui-pre-local"')
-        changed = True
 
     if changed:
         crate_cargo.write_text(new_text)
@@ -302,8 +310,6 @@ for c in crates:
         print(f"  OK: git → {dst}")
         # Разворачиваем workspace inheritance (repo_root — корень клона)
         expand_workspace_inheritance(dst, repo, name)
-        # Заменяем path = "crates/<name>" на ../<name>-local (если крейт уже в vendor/)
-        remap_path_dependencies(dst, vendor)
 
     elif src == "generated":
         gen = vu / c["generator"]
@@ -335,6 +341,14 @@ for c in crates:
         if r.returncode != 0:
             print(f"  ОШИБКА git apply:\n{r.stderr}", file=sys.stderr)
             fail = True
+
+# K1: финальный remap path-зависимостей по всем vendor/*/Cargo.toml (после того, как все крейты на месте)
+for d in sorted(vendor.iterdir()):
+    if d.is_dir() and (d / "Cargo.toml").exists():
+        try:
+            remap_path_dependencies(d, vendor)
+        except Exception as e:
+            print(f"  ВНИМАНИЕ: remap {d.name}: {e}", file=sys.stderr)
 
 sys.exit(1 if fail else 0)
 PY
