@@ -1,0 +1,45 @@
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/ToonionOfficial_twrite/crates/twrite-gpui/src/editor/context_menu.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/twrite-gpui-local/src/editor/context_menu.rs
+--- a/src/editor/context_menu.rs	2026-10-21 18:59:35.339057719 +0300
++++ b/src/editor/context_menu.rs	2026-10-21 13:05:43.416644714 +0300
+@@ -147,7 +147,7 @@
+         match id {
+             twrite_core::UNDO_ID => {
+                 if self.buffer.can_undo() {
+-                    self.buffer.undo();
++                    self.buffer.undo_word();
+                     self.selection = None;
+                     true
+                 } else {
+@@ -156,7 +156,7 @@
+             }
+             twrite_core::REDO_ID => {
+                 if self.buffer.can_redo() {
+-                    self.buffer.redo();
++                    self.buffer.redo_word();
+                     self.selection = None;
+                     true
+                 } else {
+
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/ToonionOfficial_twrite/crates/twrite-gpui/src/editor/keyboard.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/twrite-gpui-local/src/editor/keyboard.rs
+--- a/src/editor/keyboard.rs	2026-10-21 18:59:35.339057719 +0300
++++ b/src/editor/keyboard.rs	2026-10-21 13:05:43.424644887 +0300
+@@ -136,15 +136,15 @@
+             match &key_event.code {
+                 KeyCode::Char('z') => {
+                     if key_event.modifiers.shift {
+-                        self.buffer.redo();
++                        self.buffer.redo_word();
+                     } else {
+-                        self.buffer.undo();
++                        self.buffer.undo_word();
+                     }
+                     self.selection = None;
+                     edited = true;
+                 }
+                 KeyCode::Char('y') => {
+-                    self.buffer.redo();
++                    self.buffer.redo_word();
+                     self.selection = None;
+                     edited = true;
+                 }
+

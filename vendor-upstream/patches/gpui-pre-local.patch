@@ -1,0 +1,152 @@
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui/src/action.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-local/src/action.rs
+--- a/src/action.rs	2026-10-21 18:59:34.127032556 +0300
++++ b/src/action.rs	2026-10-21 11:42:28.718514641 +0300
+@@ -1,3 +1,4 @@
++// Modified for gpui-pre (snapshot of zed@93d7456): the `actions!` derive paths are crate-relative.
+ use anyhow::{Context as _, Result};
+ use collections::{HashMap, TypeIdHashMap};
+ pub use gpui_macros::Action;
+@@ -24,7 +25,7 @@
+ macro_rules! actions {
+     ($namespace:path, [ $( $(#[$attr:meta])* $name:ident),* $(,)? ]) => {
+         $(
+-            #[derive(::std::clone::Clone, ::std::cmp::PartialEq, ::std::default::Default, ::std::fmt::Debug, gpui::Action)]
++            #[derive(::std::clone::Clone, ::std::cmp::PartialEq, ::std::default::Default, ::std::fmt::Debug, $crate::Action)]
+             #[action(namespace = $namespace)]
+             $(#[$attr])*
+             pub struct $name;
+@@ -32,7 +33,7 @@
+     };
+     ([ $( $(#[$attr:meta])* $name:ident),* $(,)? ]) => {
+         $(
+-            #[derive(::std::clone::Clone, ::std::cmp::PartialEq, ::std::default::Default, ::std::fmt::Debug, gpui::Action)]
++            #[derive(::std::clone::Clone, ::std::cmp::PartialEq, ::std::default::Default, ::std::fmt::Debug, $crate::Action)]
+             $(#[$attr])*
+             pub struct $name;
+         )*
+
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui/src/app/test_context.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-local/src/app/test_context.rs
+--- a/src/app/test_context.rs	2026-10-21 19:17:19.527768140 +0300
++++ b/src/app/test_context.rs	2026-10-21 12:20:06.786675541 +0300
+@@ -1432,6 +1432,7 @@
+                 directories: true,
+                 multiple: true,
+                 prompt: None,
++                ..Default::default()
+             })
+         });
+         assert!(cx.did_prompt_for_paths());
+@@ -1447,7 +1448,7 @@
+         assert!(!cx.did_prompt_for_paths());
+ 
+         let response = receiver.await.unwrap().unwrap();
+-        assert_eq!(response, Some(selected));
++        assert_eq!(response, Some((selected, Vec::new())));
+     }
+ 
+     #[gpui::test]
+@@ -1458,6 +1459,7 @@
+                 directories: false,
+                 multiple: false,
+                 prompt: None,
++                ..Default::default()
+             })
+         });
+ 
+
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui/src/app.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-local/src/app.rs
+--- a/src/app.rs	2026-10-21 19:17:19.527768140 +0300
++++ b/src/app.rs	2026-10-21 12:17:56.947999474 +0300
+@@ -1891,7 +1891,7 @@
+     pub fn prompt_for_paths(
+         &self,
+         options: PathPromptOptions,
+-    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
++    ) -> oneshot::Receiver<Result<Option<(Vec<PathBuf>, Vec<(String, String)>)>>> {
+         self.platform.prompt_for_paths(options)
+     }
+ 
+
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui/src/platform/test/platform.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-local/src/platform/test/platform.rs
+--- a/src/platform/test/platform.rs	2026-10-21 19:17:19.531768236 +0300
++++ b/src/platform/test/platform.rs	2026-10-21 12:20:06.758674972 +0300
+@@ -592,7 +592,7 @@
+     fn prompt_for_paths(
+         &self,
+         options: crate::PathPromptOptions,
+-    ) -> oneshot::Receiver<Result<Option<Vec<std::path::PathBuf>>>> {
++    ) -> oneshot::Receiver<Result<Option<(Vec<std::path::PathBuf>, Vec<(String, String)>)>>> {
+         let (tx, rx) = oneshot::channel();
+         self.prompts.borrow_mut().paths.push_back((options, tx));
+         rx
+@@ -606,7 +606,7 @@
+     fn prompt_for_paths(
+         &self,
+         _options: crate::PathPromptOptions,
+-    ) -> oneshot::Receiver<Result<Option<Vec<std::path::PathBuf>>>> {
++    ) -> oneshot::Receiver<Result<Option<(Vec<std::path::PathBuf>, Vec<(String, String)>)>>> {
+         oneshot::channel().1
+     }
+ 
+
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui/src/platform/visual_test.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-local/src/platform/visual_test.rs
+--- a/src/platform/visual_test.rs	2026-10-21 18:59:34.131032639 +0300
++++ b/src/platform/visual_test.rs	2026-10-21 12:17:56.947999474 +0300
+@@ -148,7 +148,7 @@
+     fn prompt_for_paths(
+         &self,
+         _options: PathPromptOptions,
+-    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
++    ) -> oneshot::Receiver<Result<Option<(Vec<PathBuf>, Vec<(String, String)>)>>> {
+         let (tx, rx) = oneshot::channel();
+         tx.send(Ok(None)).ok();
+         rx
+
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui/src/platform.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-local/src/platform.rs
+--- a/src/platform.rs	2026-10-21 19:17:19.531768236 +0300
++++ b/src/platform.rs	2026-10-21 12:17:56.947999474 +0300
+@@ -444,7 +444,7 @@
+     fn prompt_for_paths(
+         &self,
+         options: PathPromptOptions,
+-    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>>;
++    ) -> oneshot::Receiver<Result<Option<(Vec<PathBuf>, Vec<(String, String)>)>>>;
+     fn prompt_for_new_path(
+         &self,
+         directory: &Path,
+@@ -2797,8 +2797,24 @@
+     Grayscale,
+ }
+ 
+-/// The options that can be configured for a file dialog prompt
++/// A single combo-box choice to attach to a file dialog prompt.
++///
++/// Portals on Linux (xdg-desktop-portal) render these as combo boxes
++/// inside the file chooser, and return the selected keys back to us.
+ #[derive(Clone, Debug)]
++pub struct PathChoice {
++    /// Unique id of the combo box (e.g. "encoding").
++    pub id: String,
++    /// User-visible label of the combo box (e.g. "Encoding").
++    pub label: String,
++    /// Available (key, label) options.
++    pub options: Vec<(String, String)>,
++    /// Initially selected key.
++    pub initial: String,
++}
++
++/// The options that can be configured for a file dialog prompt
++#[derive(Clone, Debug, Default)]
+ pub struct PathPromptOptions {
+     /// Should the prompt allow files to be selected?
+     pub files: bool,
+@@ -2808,6 +2824,8 @@
+     pub multiple: bool,
+     /// The prompt to show to a user when selecting a path
+     pub prompt: Option<SharedString>,
++    /// Extra combo boxes to render in the dialog (used for encoding etc.).
++    pub choices: Vec<PathChoice>,
+ }
+ 
+ /// What kind of prompt styling to show
+

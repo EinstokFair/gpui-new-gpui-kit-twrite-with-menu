@@ -1,0 +1,86 @@
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui_linux/src/linux/platform.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-linux/src/linux/platform.rs
+--- a/src/linux/platform.rs	2026-10-21 18:59:34.135032722 +0300
++++ b/src/linux/platform.rs	2026-10-21 12:19:17.441674236 +0300
+@@ -765,7 +765,7 @@
+     fn prompt_for_paths(
+         &self,
+         options: PathPromptOptions,
+-    ) -> oneshot::Receiver<Result<Option<Vec<PathBuf>>>> {
++    ) -> oneshot::Receiver<Result<Option<(Vec<PathBuf>, Vec<(String, String)>)>>> {
+         let (done_tx, done_rx) = oneshot::channel();
+ 
+         #[cfg(not(any(feature = "wayland", feature = "x11")))]
+@@ -783,16 +783,28 @@
+                     "Open File"
+                 };
+ 
+-                let request = match ashpd::desktop::file_chooser::OpenFileRequest::default()
+-                    .identifier(identifier.await)
+-                    .modal(true)
+-                    .title(title)
+-                    .accept_label(options.prompt.as_ref().map(gpui::SharedString::as_str))
+-                    .multiple(options.multiple)
+-                    .directory(options.directories)
+-                    .send()
+-                    .await
+-                {
++                let mut open_request =
++                    ashpd::desktop::file_chooser::OpenFileRequest::default()
++                        .identifier(identifier.await)
++                        .modal(true)
++                        .title(title)
++                        .accept_label(options.prompt.as_ref().map(gpui::SharedString::as_str))
++                        .multiple(options.multiple)
++                        .directory(options.directories);
++
++                for choice in &options.choices {
++                    let mut c = ashpd::desktop::file_chooser::Choice::new(
++                        &choice.id,
++                        &choice.label,
++                        &choice.initial,
++                    );
++                    for (key, label) in &choice.options {
++                        c = c.insert(key, label);
++                    }
++                    open_request = open_request.choice(c);
++                }
++
++                let request = match open_request.send().await {
+                     Ok(request) => request,
+                     Err(err) => {
+                         let result = match err {
+@@ -805,14 +817,16 @@
+                 };
+ 
+                 let result = match request.response() {
+-                    Ok(response) => Ok(Some(
+-                        response
++                    Ok(response) => {
++                        let paths = response
+                             .uris()
+                             .iter()
+                             .filter_map(|uri: &ashpd::Uri| url::Url::parse(uri.as_str()).ok())
+                             .filter_map(|uri: url::Url| uri.to_file_path().ok())
+-                            .collect::<Vec<_>>(),
+-                    )),
++                            .collect::<Vec<_>>();
++                        let choices = response.choices().to_vec();
++                        Ok(Some((paths, choices)))
++                    }
+                     Err(ashpd::Error::Response(_)) => Ok(None),
+                     Err(e) => Err(e.into()),
+                 };
+
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/zed-industries_zed/crates/gpui_linux/src/linux/wayland/window.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/gpui-pre-linux/src/linux/wayland/window.rs
+--- a/src/linux/wayland/window.rs	2026-10-21 18:59:34.135032722 +0300
++++ b/src/linux/wayland/window.rs	2026-10-21 16:20:59.869530759 +0300
+@@ -515,7 +515,7 @@
+                 toplevel,
+                 decoration: _decoration,
+                 dialog,
+-            }) => {
++                }) => {
+                 // drop the dialog before toplevel so compositor can explicitly unapply it's effects
+                 if let Some(dialog) = dialog {
+                     dialog.destroy();
+

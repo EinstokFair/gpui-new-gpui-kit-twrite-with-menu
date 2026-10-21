@@ -1,0 +1,71 @@
+# vendor-upstream/manifest.toml
+# Описывает, откуда брать 8 локальных крейтов в vendor/.
+# Скрипт tools/vendor.sh читает этот файл и восстанавливает vendor/.
+#
+# Типы источников:
+#   crates-io   — .crate из crates.io (скачивается и распаковывается)
+#   git         — git clone + checkout rev + (опционально) git apply patch
+#   generated   — вызывается генератор из vendor-upstream/generate/
+
+# --- gpui-pre (snapshot zed@93d7456) ---
+[[crate]]
+name = "gpui-pre-local"
+source = "crates-io"
+crate = "gpui-pre"
+version = "0.3.9"
+patch = "patches/gpui-pre-local.patch"
+
+[[crate]]
+name = "gpui-pre-linux"
+source = "crates-io"
+crate = "gpui-pre-linux"
+version = "0.3.9"
+patch = "patches/gpui-pre-linux.patch"
+
+# --- gpui (обёртка над gpui-pre) ---
+[[crate]]
+name = "gpui-local"
+source = "generated"
+generator = "generate/gpui-local.sh"
+
+# --- gpui-kit (longbridge) v0.8.0 ---
+[[crate]]
+name = "gpui-kit-local"
+source = "git"
+url = "https://github.com/longbridge/gpui-kit"
+rev = "1676826d9d49b90f4d7b6808b69924f58796f6f1"
+subdir = "crates/kit"
+# патча нет — точная копия upstream
+
+[[crate]]
+name = "gpui-base-local"
+source = "git"
+url = "https://github.com/longbridge/gpui-kit"
+rev = "1676826d9d49b90f4d7b6808b69924f58796f6f1"
+subdir = "crates/base"
+# патча нет — точная копия upstream
+
+# --- twrite (ToonionOfficial) v0.21.0 ---
+[[crate]]
+name = "twrite-local"
+source = "git"
+url = "https://github.com/ToonionOfficial/twrite"
+rev = "fbf9740d94fdd1f6ba8c48055020b462a4cf7b48"
+subdir = "crates/twrite"
+# патча нет — точная копия upstream
+
+[[crate]]
+name = "twrite-core-local"
+source = "git"
+url = "https://github.com/ToonionOfficial/twrite"
+rev = "fbf9740d94fdd1f6ba8c48055020b462a4cf7b48"
+subdir = "crates/twrite-core"
+patch = "patches/twrite-core-local.patch"
+
+[[crate]]
+name = "twrite-gpui-local"
+source = "git"
+url = "https://github.com/ToonionOfficial/twrite"
+rev = "fbf9740d94fdd1f6ba8c48055020b462a4cf7b48"
+subdir = "crates/twrite-gpui"
+patch = "patches/twrite-gpui-local.patch"

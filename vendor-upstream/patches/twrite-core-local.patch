@@ -1,0 +1,113 @@
+diff -ruN -x .git -x target -x '*.lock' -x .cargo /tmp/upstream/ToonionOfficial_twrite/crates/twrite-core/src/buffer.rs /home/user/rust/gpui-editors-research/gpui-new-gpui-kit-twrite-with-menu/vendor/twrite-core-local/src/buffer.rs
+--- a/src/buffer.rs	2026-10-21 18:59:35.339057719 +0300
++++ b/src/buffer.rs	2026-10-21 13:05:43.400644365 +0300
+@@ -4,6 +4,7 @@
+ use ropey::Rope;
+ 
+ use crate::{
++    movement::{classify_char, CharKind},
+     coordinates::Point,
+     error::{EditorError, Result},
+     history::{Edit, History, Transaction},
+@@ -36,6 +37,12 @@
+     version: usize,
+ }
+ 
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++enum TxOpKind {
++    Insert,
++    Delete,
++}
++
+ impl EditorBuffer {
+     /// Creates a new editor buffer containing `initial_text`.
+     ///
+@@ -670,6 +677,87 @@
+         true
+     }
+ 
++    /// Тип операции в транзакции: вставка или удаление.
++    fn tx_op_kind(tx: &Transaction) -> Option<TxOpKind> {
++        if tx.edits.len() != 1 {
++            return None;
++        }
++        let e = &tx.edits[0];
++        match (e.inserted_text.is_empty(), e.deleted_text.is_empty()) {
++            (false, true) => Some(TxOpKind::Insert),
++            (true, false) => Some(TxOpKind::Delete),
++            _ => None,
++        }
++    }
++
++    /// Символ, который несёт транзакция (последний inserted или deleted).
++    fn tx_char(tx: &Transaction) -> Option<char> {
++        let e = &tx.edits[0];
++        if !e.inserted_text.is_empty() {
++            e.inserted_text.chars().last()
++        } else if !e.deleted_text.is_empty() {
++            e.deleted_text.chars().last()
++        } else {
++            None
++        }
++    }
++
++    /// Откатывает последнюю группу правок как одно «слово» (leafpad-style).
++    /// Группирует только последовательные вставки или последовательные удаления;
++    /// смена типа операции или граница слова останавливают группу.
++    pub fn undo_word(&mut self) {
++        if !self.can_undo() {
++            return;
++        }
++        let first_kind = {
++            let top = self.history.undo_stack.last().unwrap();
++            Self::tx_op_kind(top)
++        };
++        let Some(first_kind) = first_kind else {
++            self.undo();
++            return;
++        };
++        self.undo();
++        while self.can_undo() {
++            let top = self.history.undo_stack.last().unwrap();
++            let Some(kind) = Self::tx_op_kind(top) else { break; };
++            if kind != first_kind { break; }
++            let Some(c) = Self::tx_char(top) else { break; };
++            if matches!(classify_char(c), CharKind::Whitespace | CharKind::Punctuation) {
++                break;
++            }
++            self.undo();
++        }
++    }
++
++    /// Повторяет последнюю группу правок как одно «слово».
++    pub fn redo_word(&mut self) {
++        if !self.can_redo() {
++            return;
++        }
++        let first_kind = {
++            let top = self.history.redo_stack.last().unwrap();
++            Self::tx_op_kind(top)
++        };
++        let Some(first_kind) = first_kind else {
++            self.redo();
++            return;
++        };
++        self.redo();
++        while self.can_redo() {
++            let top = self.history.redo_stack.last().unwrap();
++            let Some(kind) = Self::tx_op_kind(top) else { break; };
++            if kind != first_kind {
++                break;
++            }
++            let Some(c) = Self::tx_char(top) else { break; };
++            if matches!(classify_char(c), CharKind::Whitespace | CharKind::Punctuation) {
++                break;
++            }
++            self.redo();
++        }
++    }
++
+     /// Undoes the most recent transaction.
+     ///
+     /// If there is no transaction to undo, this method does nothing.
+
