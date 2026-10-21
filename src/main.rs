@@ -433,22 +433,24 @@ impl RootView {
     }
 
     fn on_save(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
-        eprintln!("on_save: current_file = {:?}", self.current_file);
         if let Some(path) = &self.current_file {
             let text = self.get_text(cx);
             if let Err(e) = std::fs::write(path, text) {
-                eprintln!("on_save: write error {:?}", e);
                 use gpui_kit::component::notification::Notification;
                 window.push_notification(
                     Notification::error(format!("Ошибка сохранения: {}", e)),
                     cx,
                 );
+                // K1: сохранение не удалось — намерение не выполнено.
+                self.pending_action = None;
+                self.quit_after_save = false;
             } else {
                 self.saved_version = self.editor.read(cx).buffer.version();
                 if let Some(a) = self.pending_action {
                     self.pending_action = None;
                     self.run_pending_action(window, cx, Some(a));
                 } else if self.quit_after_save {
+                    self.quit_after_save = false;
                     cx.quit();
                 }
             }
@@ -479,6 +481,9 @@ impl RootView {
                             Notification::error(format!("Ошибка сохранения: {}", e)),
                             cx,
                         );
+                        // K1: сбросить намерение при ошибке записи.
+                        this.pending_action = None;
+                        this.quit_after_save = false;
                     } else {
                         this.current_file = Some(path);
                         this.saved_version = this.editor.read(cx).buffer.version();
@@ -486,6 +491,7 @@ impl RootView {
                             this.pending_action = None;
                             this.run_pending_action(_window, cx, Some(a));
                         } else if this.quit_after_save {
+                            this.quit_after_save = false;
                             cx.quit();
                         }
                     }
@@ -493,14 +499,23 @@ impl RootView {
             }
             Ok(Err(err)) => {
                 use gpui_kit::component::notification::Notification;
-                _ = this.update_in(cx, |_this, window, cx| {
+                _ = this.update_in(cx, |this, window, cx| {
                     window.push_notification(
                         Notification::error(format!("Ошибка выбора файла: {}", err)),
                         cx,
                     );
+                    // K1: ошибка выбора — сбросить намерение.
+                    this.pending_action = None;
+                    this.quit_after_save = false;
                 });
             }
-            _ => {}
+            _ => {
+                // K1: отмена выбора — сбросить намерение.
+                _ = this.update_in(cx, |this, _window, _cx| {
+                    this.pending_action = None;
+                    this.quit_after_save = false;
+                });
+            }
         })
         .detach();
     }
