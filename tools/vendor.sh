@@ -86,6 +86,39 @@ def find_existing_repo(url, cache_dir):
     return None
 
 
+def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
+    """Заменить `path = "crates/<name>"` на `../<name>-local` для крейтов, уже присутствующих в vendor/."""
+    crate_cargo = crate_dir / "Cargo.toml"
+    if not crate_cargo.exists():
+        return
+
+    text = crate_cargo.read_text()
+    changed = False
+
+    def repl(m):
+        nonlocal changed
+        prefix, name = m.group(1), m.group(2)
+        # уже local? (../<name>-local) — не трогаем
+        if name.endswith("-local"):
+            return m.group(0)
+        candidate = vendor_dir / f"{name}-local"
+        if candidate.is_dir() and (candidate / "Cargo.toml").exists():
+            changed = True
+            return f'{prefix}path = "../{name}-local"'
+        return m.group(0)
+
+    new_text = re.sub(r'(\bpath\s*=\s*)"crates/([\w-]+)"', repl, text)
+
+    # Спецслучай: gpui -> gpui-pre-local (имя каталога не совпадает с <name>-local)
+    if "path = \"crates/gpui\"" in new_text and (vendor_dir / "gpui-pre-local").is_dir():
+        new_text = new_text.replace('path = "crates/gpui"', 'path = "../gpui-pre-local"')
+        changed = True
+
+    if changed:
+        crate_cargo.write_text(new_text)
+        print(f"  OK: remap path-зависимостей в {crate_cargo.relative_to(crate_dir.parent.parent)}")
+
+
 def clone_git(url, rev, cache_dir):
     repo = find_existing_repo(url, cache_dir)
     if repo is None:
@@ -115,15 +148,11 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
     text = crate_cargo.read_text()
 
     # 1. Простые поля: `edition.workspace = true` → `edition = "<значение>"`
-    for field in ("edition", "version", "license", "repository", "rust-version", "authors"):
+    for field in ("edition", "version", "license", "repository", "rust-version", "authors", "publish"):
         pattern = rf'^{field}\.workspace\s*=\s*true\s*$'
         if re.search(pattern, text, re.MULTILINE):
             if field in ws_pkg:
-                value = ws_pkg[field]
-                if isinstance(value, list):
-                    value_str = "[" + ", ".join(f'"{v}"' for v in value) + "]"
-                else:
-                    value_str = f'"{value}"'
+                value_str = toml_value(ws_pkg[field])
                 text = re.sub(pattern, f'{field} = {value_str}', text, count=1, flags=re.MULTILINE)
 
     # 2. `foo.workspace = true` внутри [dependencies], [dev-dependencies], [build-dependencies], [*-dependencies] секций:
@@ -273,6 +302,8 @@ for c in crates:
         print(f"  OK: git → {dst}")
         # Разворачиваем workspace inheritance (repo_root — корень клона)
         expand_workspace_inheritance(dst, repo, name)
+        # Заменяем path = "crates/<name>" на ../<name>-local (если крейт уже в vendor/)
+        remap_path_dependencies(dst, vendor)
 
     elif src == "generated":
         gen = vu / c["generator"]

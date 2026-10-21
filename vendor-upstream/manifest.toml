@@ -63,3 +63,66 @@ url = "https://github.com/ToonionOfficial/twrite"
 rev = "fbf9740d94fdd1f6ba8c48055020b462a4cf7b48"
 subdir = "crates/twrite-gpui"
 patch = "patches/twrite-gpui-local.patch"
+
+[[crate]]
+name = "assets-local"
+source = "git"
+url = "https://github.com/longbridge/gpui-kit"
+rev = "1676826d9d49b90f4d7b6808b69924f58796f6f1"
+subdir = "crates/assets"
+
+[[crate]]
+name = "bench-metrics-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/bench_metrics"
+
+[[crate]]
+name = "collections-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/collections"
+
+[[crate]]
+name = "component-local"
+source = "git"
+url = "https://github.com/longbridge/gpui-kit"
+rev = "1676826d9d49b90f4d7b6808b69924f58796f6f1"
+subdir = "crates/component"
+
+[[crate]]
+name = "gpui-platform-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_platform"
+
+[[crate]]
+name = "gpui-wgpu-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_wgpu"
+
+[[crate]]
+name = "http-client-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/http_client"
+
+[[crate]]
+name = "reqwest-client-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/reqwest_client"
+
+[[crate]]
+name = "scheduler-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/scheduler"
