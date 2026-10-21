@@ -9,7 +9,7 @@ use ::gpui::PathChoice;
 
 mod about_window;
 mod settings;
-use about_window::AboutWindow;
+use about_window::{AboutWindow, CloseAbout};
 use settings::ThemeKind;
 
 // --- Действия ---
@@ -106,8 +106,6 @@ impl RootView {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let menu_bar = AppMenuBar::new(cx);
 
-        // Стартовая тема: из настроек (иначе тёмная). Применяем к редактору сразу,
-        // чтобы не было рассинхрона со стартовой темой gpui-kit (её ставит main()).
         let start_kind = settings::load_theme().unwrap_or(ThemeKind::Dark);
         let editor = cx.new(|cx| {
             let mut ed = Editor::new("Hello from TWrite + gpui-kit + menu!", cx);
@@ -342,13 +340,13 @@ impl RootView {
         };
 
         let root_weak = cx.entity().downgrade();
-        gpui_kit::open_window(options, cx, move |_window, cx| {
+        gpui_kit::open_window(options, cx, move |window, cx| {
             let root_weak_cb = root_weak.clone();
             let on_close: Box<dyn Fn(&mut Window, &mut App) + 'static> =
                 Box::new(move |_w, app| {
                     let _ = root_weak_cb.update(app, |_root, _cx| {});
                 });
-            cx.new(|cx| AboutWindow::new(cx, on_close))
+            cx.new(|cx| AboutWindow::new(window, cx, on_close))
         })
         .ok();
     }
@@ -408,7 +406,6 @@ fn main() {
         .run(|cx| {
             gpui_kit::init(cx);
 
-            // Стартовая тема gpui-kit: из настроек, иначе тёмная.
             let start_theme = settings::load_theme().unwrap_or(ThemeKind::Dark);
             Theme::change(
                 match start_theme {
@@ -418,6 +415,20 @@ fn main() {
                 None,
                 cx,
             );
+
+            cx.bind_keys([
+                KeyBinding::new("secondary-s", SaveFile, None),
+                KeyBinding::new("secondary-shift-s", SaveFileAs, None),
+                KeyBinding::new("secondary-z", Undo, None),
+                KeyBinding::new("secondary-shift-z", Redo, None),
+                KeyBinding::new("secondary-x", Cut, None),
+                KeyBinding::new("secondary-c", Copy, None),
+                KeyBinding::new("secondary-v", Paste, None),
+                KeyBinding::new("secondary-a", SelectAll, None),
+                KeyBinding::new("secondary-n", NewFile, None),
+                KeyBinding::new("secondary-o", OpenFile, None),
+                KeyBinding::new("escape", CloseAbout, Some("AboutWindow")),
+            ]);
 
             let menus = vec![
                 gpui_kit::Menu {

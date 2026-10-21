@@ -2,26 +2,52 @@ use gpui::*;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::TitleBar;
 
+#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
+#[action(namespace = my_editor, no_json)]
+pub struct CloseAbout;
+
 pub struct AboutWindow {
+    focus_handle: FocusHandle,
     on_close: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
 }
 
 impl AboutWindow {
     pub fn new(
-        _cx: &mut Context<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
         on_close: Box<dyn Fn(&mut Window, &mut App) + 'static>,
     ) -> Self {
-        Self { on_close: Some(on_close) }
+        let focus_handle = cx.focus_handle();
+        // Принудительно ставим фокус на корень окна About, чтобы
+        // key_context("AboutWindow") попал в dispatch path и Esc сработал.
+        window.focus(&focus_handle, cx);
+        Self { focus_handle, on_close: Some(on_close) }
+    }
+
+    fn close(&mut self, window: &mut Window, cx: &mut App) {
+        if let Some(cb) = self.on_close.take() {
+            cb(window, cx);
+        }
+        window.remove_window();
     }
 }
 
 impl Render for AboutWindow {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let on_close = self.on_close.take();
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .key_context("AboutWindow")
+            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .flex_col()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if event.keystroke.key == "escape" {
+                    this.close(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &CloseAbout, window, cx| {
+                this.close(window, cx);
+            }))
             .child(
                 TitleBar::new()
                     .h(px(32.))
@@ -50,12 +76,9 @@ impl Render for AboutWindow {
                     .child(
                         Button::new("about-ok")
                             .label("ОК")
-                            .on_click(move |_, window, cx| {
-                                if let Some(cb) = &on_close {
-                                    cb(window, cx);
-                                }
-                                window.remove_window();
-                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.close(window, cx);
+                            }))
                     )
             )
     }
