@@ -149,26 +149,28 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                     continue
                 # ws_dep: либо строка версии, либо dict
                 if isinstance(ws_dep, str):
+                    base = {"version": ws_dep}
                     if rest.strip():
-                        new_val = "{ version = " + f'"{ws_dep}"' + ", " + rest.strip().rstrip(",").strip() + " }"
+                        base.update(toml.loads("x = {" + rest.strip().strip(" ,") + "}")["x"])
+                    if len(base) == 1 and "version" in base:
+                        new_val = f'"{base["version"]}"'
                     else:
-                        new_val = f'"{ws_dep}"'
+                        new_val = toml_value(base)
                 else:
-                    parts = []
-                    if "version" in ws_dep:
-                        parts.append(f'version = "{ws_dep["version"]}"')
-                    if "package" in ws_dep:
-                        parts.append(f'package = "{ws_dep["package"]}"')
-                    if "features" in ws_dep:
-                        feats = ", ".join(f'"{f}"' for f in ws_dep["features"])
-                        parts.append(f'features = [{feats}]')
-                    if "default-features" in ws_dep:
-                        parts.append(f'default-features = {str(ws_dep["default-features"]).lower()}')
+                    merged = dict(ws_dep)
                     if rest.strip():
-                        # Сохраняем доп. поля из crate Cargo.toml (optional, default-features, features и т.п.)
-                        extra = rest.strip().rstrip(",").strip()
-                        parts.append(extra)
-                    new_val = "{ " + ", ".join(parts) + " }"
+                        extra = toml.loads("x = {" + rest.strip().strip(" ,") + "}")["x"]
+                        # features аддитивны: объединяем без дублей (workspace-порядок сохраняем)
+                        ws_feats = list(merged.get("features", []))
+                        for f in extra.get("features", []):
+                            if f not in ws_feats:
+                                ws_feats.append(f)
+                        if ws_feats:
+                            merged["features"] = ws_feats
+                        for k, v in extra.items():
+                            if k != "features":
+                                merged[k] = v  # rest переопределяет workspace
+                    new_val = toml_value(merged)
                 out_lines.append(f'{indent}{dep} = {new_val}')
                 continue
             # 2b. `foo.workspace = true`
