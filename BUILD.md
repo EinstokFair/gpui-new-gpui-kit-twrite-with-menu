@@ -5,7 +5,7 @@
 - **Rust** (stable, edition 2021). Проверено на Rust 1.85+.
 - **git**, **curl**, **tar** — для разворачивания `vendor/`.
 - **Linux**: системные библиотеки для GPUI:
-  - `libwayland-dev`, `libxkbcommon-dev`, `libx11-dev`, `libxcb1-dev`
+  - `libwayland-dev`, `libxkbcommon-dev`, `libxkbcommon-x11-dev`, `libx11-dev`, `libxcb1-dev`
   - `libfontconfig1-dev`, `libfreetype6-dev`
   - `libvulkan-dev`, `libegl1-mesa-dev`, `libgles2-mesa-dev`
   - `libasound2-dev` (для аудио, если используется)
@@ -13,7 +13,7 @@
 Установка на Debian/Ubuntu (пример):
 
     sudo apt install build-essential git curl \
-      libwayland-dev libxkbcommon-dev libx11-dev libxcb1-dev \
+      libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-dev libxcb1-dev \
       libfontconfig1-dev libfreetype6-dev \
       libvulkan-dev libegl1-mesa-dev libgles2-mesa-dev \
       libasound2-dev
