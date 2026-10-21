@@ -140,3 +140,17 @@ source = "git"
 url = "https://github.com/zed-industries/zed"
 rev = "93d745668805029476e6d7fbb19652116fed51de"
 subdir = "crates/util"
+
+[[crate]]
+name = "util-macros-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/util_macros"
+
+[[crate]]
+name = "path-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/path"

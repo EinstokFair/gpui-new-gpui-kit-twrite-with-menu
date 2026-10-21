@@ -112,11 +112,13 @@ def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
         if target and (vendor_dir / target).is_dir() and (vendor_dir / target / "Cargo.toml").exists():
             changed = True
             return f'{prefix}path = "../{target}"'
-        # 2) <name>-local
-        candidate = vendor_dir / f"{name}-local"
-        if candidate.is_dir() and (candidate / "Cargo.toml").exists():
-            changed = True
-            return f'{prefix}path = "../{name}-local"'
+        # 2) <name>-local и <name с _ -> ->-local (bench_metrics -> bench-metrics-local)
+        candidates = [f"{name}-local", f"{name.replace('_', '-')}-local"]
+        for cand_name in candidates:
+            candidate = vendor_dir / cand_name
+            if candidate.is_dir() and (candidate / "Cargo.toml").exists():
+                changed = True
+                return f'{prefix}path = "../{cand_name}"'
         return m.group(0)
 
     new_text = re.sub(r'(\bpath\s*=\s*)"crates/([\w-]+)"', repl, text)
