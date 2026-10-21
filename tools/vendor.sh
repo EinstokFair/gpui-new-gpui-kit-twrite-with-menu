@@ -13,7 +13,7 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 VU="$REPO_ROOT/vendor-upstream"
 VENDOR="$REPO_ROOT/vendor"
 MANIFEST="$VU/manifest.toml"
-CACHE="${HOME}/.cache/gpui-editors-upstream"
+CACHE="${VENDOR_UPSTREAM_CACHE:-${HOME}/.cache/gpui-editors-upstream}"
 
 if [[ ! -f "$MANIFEST" ]]; then
     echo "ОШИБКА: $MANIFEST не найден." >&2
@@ -22,13 +22,14 @@ fi
 
 mkdir -p "$VENDOR" "$CACHE"
 
-python3 - "$MANIFEST" "$VENDOR" "$VU" "$CACHE" <<'PY'
+python3 - "$MANIFEST" "$VENDOR" "$VU" "$CACHE" "$REPO_ROOT" <<'PY'
 import sys, pathlib, subprocess, os, shutil, tarfile, urllib.request, re
 
 manifest_path = pathlib.Path(sys.argv[1])
 vendor = pathlib.Path(sys.argv[2])
 vu = pathlib.Path(sys.argv[3])
 cache = pathlib.Path(sys.argv[4])
+repo_root_py = pathlib.Path(sys.argv[5])
 
 try:
     import tomllib as toml
@@ -49,6 +50,21 @@ if not crates:
 def run(cmd, cwd=None):
     print("  $", " ".join(cmd))
     subprocess.run(cmd, check=True, cwd=cwd)
+
+
+def toml_value(v):
+    """Рендер Python-значения в TOML-литерал (для inline-table и скаляров)."""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    if isinstance(v, list):
+        return "[" + ", ".join(toml_value(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{ " + ", ".join(f"{k} = {toml_value(x)}" for k, x in v.items()) + " }"
+    raise TypeError(f"unsupported TOML value: {v!r}")
 
 
 def clone_git(url, rev, cache_dir):
@@ -165,7 +181,7 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
             for section, rules in ws_lints.items():
                 lints_text.append(f"[lints.{section}]")
                 for rule, level in rules.items():
-                    lints_text.append(f'{rule} = "{level}"' if isinstance(level, str) else f'{rule} = {level}')
+                    lints_text.append(f'{rule} = {toml_value(level)}')
                 lints_text.append("")
             text = re.sub(r'^\[lints\]\s*\nworkspace\s*=\s*true\s*$',
                           "\n".join(lints_text), text, flags=re.MULTILINE)
@@ -225,8 +241,12 @@ for c in crates:
             fail = True
             continue
         print(f"  git apply {patch_file}")
-        r = subprocess.run(["git", "apply", "--directory", str(dst), "-p1", str(patch_file)],
-                           capture_output=True, text=True)
+        rel_dst = dst.relative_to(repo_root_py)
+        r = subprocess.run(
+            ["git", "-C", str(repo_root_py), "apply",
+             "--directory", str(rel_dst), "-p1", str(patch_file)],
+            capture_output=True, text=True,
+        )
         if r.returncode != 0:
             print(f"  ОШИБКА git apply:\n{r.stderr}", file=sys.stderr)
             fail = True
