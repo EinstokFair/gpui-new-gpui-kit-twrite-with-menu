@@ -693,7 +693,9 @@ fn main() {
 
             cx.bind_keys([
                 KeyBinding::new("secondary-s", SaveFile, None),
-                KeyBinding::new("alt-f4", Quit, None),
+                KeyBinding::new("alt-f4", Quit, Some("RootView")),
+                KeyBinding::new("alt-f4", CloseSaveDialog, Some("SaveDialog")),
+                KeyBinding::new("alt-f4", CloseAbout, Some("AboutWindow")),
                 KeyBinding::new("secondary-shift-s", SaveFileAs, None),
                 KeyBinding::new("secondary-z", Undo, None),
                 KeyBinding::new("secondary-shift-z", Redo, None),
@@ -706,16 +708,6 @@ fn main() {
                 KeyBinding::new("escape", CloseAbout, Some("AboutWindow")),
                 KeyBinding::new("escape", CloseSaveDialog, Some("SaveDialog")),
             ]);
-
-            cx.on_action(|_: &Quit, cx| {
-                if let Some(handle) = cx.active_window() {
-                    let _ = handle.update(cx, |_, window, cx| {
-                        window.dispatch_action(Box::new(Quit), cx);
-                    });
-                } else {
-                    cx.quit();
-                }
-            });
 
             let menus = vec![
                 gpui_kit::Menu {
