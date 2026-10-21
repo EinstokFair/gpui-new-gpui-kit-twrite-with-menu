@@ -395,6 +395,9 @@ impl RootView {
             }
         };
 
+        // Читаем с выбранной кодировкой (utf-8 / cp1251 / cp866 — см. PathChoice).
+        // ВАЖНО: сохранение — всегда в UTF-8 (см. on_save / on_save_as).
+        // Это осознанное решение; пользователь в курсе.
         let encoding_ref = encoding_rs::Encoding::for_label(encoding.as_bytes())
             .unwrap_or(encoding_rs::UTF_8);
         let (decoded, _, had_errors) = encoding_ref.decode(&bytes);
@@ -426,6 +429,11 @@ impl RootView {
     fn on_save(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(path) = &self.current_file {
             let text = self.get_text(cx);
+            // ВАЖНО: сохраняем всегда в UTF-8 — это осознанное решение.
+            // Буфер редактора — String (UTF-8), кодировка при сохранении
+            // не выбирается. Пользователь в курсе.
+            // (При открытии — кодировка выбирается через PathChoice, см.
+            //  open_file_with_encoding; при сохранении — всегда UTF-8.)
             if let Err(e) = std::fs::write(path, text) {
                 use gpui_kit::component::notification::Notification;
                 window.push_notification(
@@ -466,6 +474,8 @@ impl RootView {
             Ok(Ok(Some(path))) => {
                 _ = this.update_in(cx, |this, _window, cx| {
                     let text = this.get_text(cx);
+                    // ВАЖНО: сохраняем всегда в UTF-8 — осознанное решение.
+                    // Кодировка при сохранении не выбирается (пользователь в курсе).
                     if let Err(e) = std::fs::write(&path, text) {
                         use gpui_kit::component::notification::Notification;
                         _window.push_notification(
