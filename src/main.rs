@@ -12,6 +12,12 @@ mod save_dialog;
 mod settings;
 use about_window::{AboutWindow, CloseAbout};
 use save_dialog::{CloseSaveDialog, SaveDialog};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PendingAction { New, Open }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SaveResult { ProceedToAction, DiscardAndProceed }
 use settings::ThemeKind;
 
 // --- Действия ---
@@ -74,6 +80,8 @@ struct RootView {
     current_file: Option<PathBuf>,
     saved_version: usize,
     quit_after_save: bool,
+    pending_action: Option<PendingAction>,
+    pending_save_result: Option<SaveResult>,
 }
 
 fn light_editor_theme() -> EditorTheme {
@@ -153,6 +161,8 @@ impl RootView {
             current_file: None,
             saved_version,
             quit_after_save: false,
+            pending_action: None,
+            pending_save_result: None,
         }
     }
 
@@ -176,11 +186,26 @@ impl RootView {
     }
 
     /// Единая точка выхода: открывает отдельное окно SaveDialog.
-    fn request_quit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.request_save_dialog(None, window, cx);
+    }
+
+    /// Открывает SaveDialog; после выбора — либо квит, либо pending_action.
+    fn request_save_dialog(
+        &mut self,
+        action: Option<PendingAction>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.is_dirty(cx) {
-            cx.quit();
+            match action {
+                None => cx.quit(),
+                Some(_) => self.run_pending_action(window, cx, action),
+            }
             return;
         }
+        self.pending_action = action;
+        self.quit_after_save = action.is_none();
 
         let bounds = Bounds::centered(None, size(px(500.), px(250.)), cx);
         let options = WindowOptions {
@@ -200,16 +225,15 @@ impl RootView {
             let on_save: Box<dyn Fn(&mut Window, &mut App) + 'static> =
                 Box::new(move |_w, app| {
                     let _ = root_weak_save.update(app, |root, cx| {
-                        root.quit_after_save = true;
-                        // Вызываем on_save через тот же путь, что и меню
-                        let window = _w;
-                        root.on_save(&SaveFile, window, cx);
+                        root.pending_save_result = Some(SaveResult::ProceedToAction);
+                        cx.notify();
                     });
                 });
             let on_discard: Box<dyn Fn(&mut Window, &mut App) + 'static> =
                 Box::new(move |_w, app| {
-                    let _ = root_weak_discard.update(app, |_root, cx| {
-                        cx.quit();
+                    let _ = root_weak_discard.update(app, |root, cx| {
+                        root.pending_save_result = Some(SaveResult::DiscardAndProceed);
+                        cx.notify();
                     });
                 });
             cx.new(|cx| SaveDialog::new(window, cx, on_save, on_discard))
@@ -217,13 +241,65 @@ impl RootView {
         .ok();
     }
 
+    fn run_pending_action(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        action: Option<PendingAction>,
+    ) {
+        match action {
+            Some(PendingAction::New) => self.do_new(window, cx),
+            Some(PendingAction::Open) => self.do_open(window, cx),
+            None => {}
+        }
+    }
+
+    fn handle_save_result(
+        &mut self,
+        result: SaveResult,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            SaveResult::ProceedToAction => {
+                // "Сохранить": выполняем on_save в контексте редактора.
+                // При успехе on_save сам выполнит pending_action/quit.
+                // При ошибке push_notification пойдёт в окно редактора.
+                self.on_save(&SaveFile, window, cx);
+            }
+            SaveResult::DiscardAndProceed => {
+                self.saved_version = self.editor.read(cx).buffer.version();
+                match self.pending_action.take() {
+                    Some(a) => self.run_pending_action(window, cx, Some(a)),
+                    None => cx.quit(),
+                }
+            }
+        }
+    }
+
     fn on_new(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_dirty(cx) {
+            self.request_save_dialog(Some(PendingAction::New), window, cx);
+            return;
+        }
+        self.do_new(window, cx);
+    }
+
+    fn do_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.current_file = None;
         self.set_text(String::new(), window, cx);
         self.saved_version = self.editor.read(cx).buffer.version();
     }
 
     fn on_open(&mut self, _: &OpenFile, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_dirty(cx) {
+            self.request_save_dialog(Some(PendingAction::Open), window, cx);
+            return;
+        }
+        self.do_open(window, cx);
+    }
+
+    fn do_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let picked = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -326,7 +402,10 @@ impl RootView {
                 );
             } else {
                 self.saved_version = self.editor.read(cx).buffer.version();
-                if self.quit_after_save {
+                if let Some(a) = self.pending_action {
+                    self.pending_action = None;
+                    self.run_pending_action(window, cx, Some(a));
+                } else if self.quit_after_save {
                     cx.quit();
                 }
             }
@@ -360,7 +439,10 @@ impl RootView {
                     } else {
                         this.current_file = Some(path);
                         this.saved_version = this.editor.read(cx).buffer.version();
-                        if this.quit_after_save {
+                        if let Some(a) = this.pending_action {
+                            this.pending_action = None;
+                            this.run_pending_action(_window, cx, Some(a));
+                        } else if this.quit_after_save {
                             cx.quit();
                         }
                     }
@@ -489,6 +571,9 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(result) = self.pending_save_result.take() {
+            self.handle_save_result(result, _window, cx);
+        }
         let dirty = self.is_dirty(cx);
         let title = match (&self.current_file, dirty) {
             (Some(p), true) => format!("* {} — Редактор TWrite", p.to_string_lossy()),
