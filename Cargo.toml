@@ -1,0 +1,20 @@
+[package]
+name = "gpui-new-gpui-kit-twrite-editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui-component = "0.8.0"
+twrite = { version = "0.21.0", features = ["gpui-new-api"] }
+encoding_rs = "0.8"
+gpui-kit = { path = "vendor/gpui-kit-local" }
+gpui = { path = "vendor/gpui-local", features = ["wayland", "x11"] }
+gpui_platform = { package = "gpui-pre-platform", version = "0.3.9", features = ["wayland", "x11"] }
+
+[patch.crates-io]
+twrite-gpui = { path = "vendor/twrite-gpui-local" }
+twrite-core = { path = "vendor/twrite-core-local" }
+twrite = { path = "vendor/twrite-local" }
+gpui = { path = "vendor/gpui-local" }
+gpui-pre = { path = "vendor/gpui-pre-local" }
+gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
