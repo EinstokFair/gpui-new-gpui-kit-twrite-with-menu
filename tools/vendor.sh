@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # tools/vendor.sh — восстановить vendor/ из vendor-upstream/manifest.toml.
 # Работает на любой машине: git clone проекта → tools/vendor.sh → cargo build.
+# Никаких crates.io — только git.
 #
 # Требования:
-#   - git
-#   - curl
-#   - python3 с tomllib (Python 3.11+)  ИЛИ  tomli (pip install tomli)
-#   - tar
+#   - git, curl, tar
+#   - python3.11+ (tomllib) или pip install tomli
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,9 +22,8 @@ fi
 
 mkdir -p "$VENDOR" "$CACHE"
 
-# Парсер TOML: пробуем tomllib (3.11+), иначе tomli
 python3 - "$MANIFEST" "$VENDOR" "$VU" "$CACHE" <<'PY'
-import sys, pathlib, subprocess, os, shutil, tarfile, urllib.request
+import sys, pathlib, subprocess, os, shutil, tarfile, urllib.request, re
 
 manifest_path = pathlib.Path(sys.argv[1])
 vendor = pathlib.Path(sys.argv[2])
@@ -47,21 +45,11 @@ if not crates:
     print("ОШИБКА: в manifest.toml нет [[crate]]", file=sys.stderr)
     sys.exit(1)
 
+
 def run(cmd, cwd=None):
     print("  $", " ".join(cmd))
     subprocess.run(cmd, check=True, cwd=cwd)
 
-def download_crate(crate_name, version, dest_dir):
-    file_name = f"{crate_name}-{version}.crate"
-    local = cache / file_name
-    if not local.exists():
-        url = f"https://static.crates.io/crates/{crate_name}/{file_name}"
-        print(f"  curl {url}")
-        urllib.request.urlretrieve(url, local)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(local, "r:gz") as tf:
-        tf.extractall(dest_dir, filter="data")
-    return dest_dir / f"{crate_name}-{version}"
 
 def clone_git(url, rev, cache_dir):
     name = url.rstrip("/").split("/")[-1].replace(".git", "")
@@ -69,11 +57,124 @@ def clone_git(url, rev, cache_dir):
     if not repo.exists():
         print(f"  git clone {url}")
         run(["git", "clone", "--quiet", url, str(repo)])
-    print(f"  git fetch --depth 1 origin {rev}")
     subprocess.run(["git", "-C", str(repo), "fetch", "--depth", "1", "origin", rev],
                    check=False)
     run(["git", "-C", str(repo), "checkout", "--quiet", rev])
     return repo
+
+
+def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Path, crate_name: str):
+    """Развернуть `*.workspace = true` в Cargo.toml в конкретные значения из корневого workspace."""
+    root_cargo = repo_root / "Cargo.toml"
+    crate_cargo = crate_dir / "Cargo.toml"
+
+    if not root_cargo.exists() or not crate_cargo.exists():
+        return
+
+    root_data = toml.loads(root_cargo.read_text())
+    ws_pkg = root_data.get("workspace", {}).get("package", {}) or {}
+    ws_deps = root_data.get("workspace", {}).get("dependencies", {}) or {}
+    ws_lints = root_data.get("workspace", {}).get("lints", {}) or {}
+
+    text = crate_cargo.read_text()
+
+    # 1. Простые поля: `edition.workspace = true` → `edition = "<значение>"`
+    for field in ("edition", "version", "license", "repository", "rust-version", "authors"):
+        pattern = rf'^{field}\.workspace\s*=\s*true\s*$'
+        if re.search(pattern, text, re.MULTILINE):
+            if field in ws_pkg:
+                value = ws_pkg[field]
+                if isinstance(value, list):
+                    value_str = "[" + ", ".join(f'"{v}"' for v in value) + "]"
+                else:
+                    value_str = f'"{value}"'
+                text = re.sub(pattern, f'{field} = {value_str}', text, count=1, flags=re.MULTILINE)
+
+    # 2. `foo.workspace = true` внутри [dependencies], [dev-dependencies], [build-dependencies], [*-dependencies] секций:
+    #    `foo = { workspace = true }` или `foo.workspace = true`
+    lines = text.splitlines()
+    in_deps_section = False
+    out_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'^\[.*dependencies.*\]', stripped):
+            in_deps_section = True
+        elif stripped.startswith("[") and not re.match(r'^\[.*dependencies.*\]', stripped):
+            in_deps_section = False
+
+        if in_deps_section:
+            # 2a. `foo = { workspace = true, ... }`
+            m = re.match(r'^(\s*)([\w-]+)\s*=\s*\{\s*workspace\s*=\s*true\s*(.*?)\}\s*$', line)
+            if m:
+                indent, dep, rest = m.group(1), m.group(2), m.group(3)
+                ws_dep = ws_deps.get(dep)
+                if ws_dep is None:
+                    out_lines.append(line)
+                    continue
+                # ws_dep: либо строка версии, либо dict
+                if isinstance(ws_dep, str):
+                    new_val = f'"{ws_dep}"'
+                else:
+                    parts = []
+                    if "version" in ws_dep:
+                        parts.append(f'version = "{ws_dep["version"]}"')
+                    if "package" in ws_dep:
+                        parts.append(f'package = "{ws_dep["package"]}"')
+                    if "features" in ws_dep:
+                        feats = ", ".join(f'"{f}"' for f in ws_dep["features"])
+                        parts.append(f'features = [{feats}]')
+                    if "default-features" in ws_dep:
+                        parts.append(f'default-features = {str(ws_dep["default-features"]).lower()}')
+                    if rest.strip():
+                        # сохраняем дополнительные поля из crate Cargo.toml
+                        pass
+                    new_val = "{ " + ", ".join(parts) + " }"
+                out_lines.append(f'{indent}{dep} = {new_val}')
+                continue
+            # 2b. `foo.workspace = true`
+            m = re.match(r'^(\s*)([\w-]+)\.workspace\s*=\s*true\s*$', line)
+            if m:
+                indent, dep = m.group(1), m.group(2)
+                ws_dep = ws_deps.get(dep)
+                if ws_dep is None:
+                    out_lines.append(line)
+                    continue
+                if isinstance(ws_dep, str):
+                    new_val = f'"{ws_dep}"'
+                else:
+                    parts = []
+                    if "version" in ws_dep:
+                        parts.append(f'version = "{ws_dep["version"]}"')
+                    if "package" in ws_dep:
+                        parts.append(f'package = "{ws_dep["package"]}"')
+                    if "features" in ws_dep:
+                        feats = ", ".join(f'"{f}"' for f in ws_dep["features"])
+                        parts.append(f'features = [{feats}]')
+                    new_val = "{ " + ", ".join(parts) + " }"
+                out_lines.append(f'{indent}{dep} = {new_val}')
+                continue
+        out_lines.append(line)
+
+    text = "\n".join(out_lines)
+
+    # 3. [lints] workspace = true → развернуть или удалить
+    if re.search(r'^\[lints\]\s*\nworkspace\s*=\s*true\s*$', text, re.MULTILINE):
+        if ws_lints:
+            # Заменяем на [lints.rust] и [lints.clippy] из workspace
+            lints_text = []
+            for section, rules in ws_lints.items():
+                lints_text.append(f"[lints.{section}]")
+                for rule, level in rules.items():
+                    lints_text.append(f'{rule} = "{level}"' if isinstance(level, str) else f'{rule} = {level}')
+                lints_text.append("")
+            text = re.sub(r'^\[lints\]\s*\nworkspace\s*=\s*true\s*$',
+                          "\n".join(lints_text), text, flags=re.MULTILINE)
+        else:
+            text = re.sub(r'^\[lints\]\s*\nworkspace\s*=\s*true\s*\n?', '', text, flags=re.MULTILINE)
+
+    crate_cargo.write_text(text)
+    print(f"  OK: развёрнут workspace inheritance в {crate_cargo.relative_to(crate_dir.parent.parent)}")
+
 
 fail = False
 for c in crates:
@@ -91,12 +192,7 @@ for c in crates:
         fail = True
         continue
 
-    if src == "crates-io":
-        extracted = download_crate(c["crate"], c["version"], cache)
-        shutil.copytree(extracted, dst)
-        print(f"  OK: crates-io → {dst}")
-
-    elif src == "git":
+    if src == "git":
         repo = clone_git(c["url"], c["rev"], cache)
         subdir = repo / c["subdir"]
         if not (subdir / "Cargo.toml").exists():
@@ -105,6 +201,8 @@ for c in crates:
             continue
         shutil.copytree(subdir, dst)
         print(f"  OK: git → {dst}")
+        # Разворачиваем workspace inheritance (repo_root — корень клона)
+        expand_workspace_inheritance(dst, repo, name)
 
     elif src == "generated":
         gen = vu / c["generator"]
@@ -116,11 +214,10 @@ for c in crates:
         print(f"  OK: generated → {dst}")
 
     else:
-        print(f"  ОШИБКА: неизвестный source={src}", file=sys.stderr)
+        print(f"  ОШИБКА: неизвестный source={src} (crates-io запрещён)", file=sys.stderr)
         fail = True
         continue
 
-    # Применяем патч, если есть
     if "patch" in c:
         patch_file = vu / c["patch"]
         if not patch_file.exists():
@@ -128,7 +225,6 @@ for c in crates:
             fail = True
             continue
         print(f"  git apply {patch_file}")
-        # Патч должен применяться с -p1 из директории dst
         r = subprocess.run(["git", "apply", "--directory", str(dst), "-p1", str(patch_file)],
                            capture_output=True, text=True)
         if r.returncode != 0:
