@@ -98,6 +98,9 @@ def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
     # Явные алиасы: upstream-имя -> локальное имя в vendor/ (если не совпадает с <name>-local)
     aliases = {
         "gpui": "gpui-pre-local",
+        "gpui_linux": "gpui-pre-linux",
+        "gpui_macros": "gpui-macros-local",
+        "gpui-base": "gpui-base-local",
         "twrite-core": "twrite-core-local",
         "twrite-gpui": "twrite-gpui-local",
     }

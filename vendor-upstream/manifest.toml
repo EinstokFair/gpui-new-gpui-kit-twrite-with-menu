@@ -154,3 +154,73 @@ source = "git"
 url = "https://github.com/zed-industries/zed"
 rev = "93d745668805029476e6d7fbb19652116fed51de"
 subdir = "crates/path"
+
+[[crate]]
+name = "gpui-macros-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_macros"
+
+[[crate]]
+name = "gpui-util-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_util"
+
+[[crate]]
+name = "gpui-shared-string-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_shared_string"
+
+[[crate]]
+name = "refineable-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/refineable"
+
+[[crate]]
+name = "sum-tree-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/sum_tree"
+
+[[crate]]
+name = "http-client-tls-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/http_client_tls"
+
+[[crate]]
+name = "gpui-macos-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_macos"
+
+[[crate]]
+name = "gpui-windows-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_windows"
+
+[[crate]]
+name = "gpui-web-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_web"
+
+[[crate]]
+name = "gpui-linux-local"
+source = "git"
+url = "https://github.com/zed-industries/zed"
+rev = "93d745668805029476e6d7fbb19652116fed51de"
+subdir = "crates/gpui_linux"
