@@ -149,7 +149,10 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                     continue
                 # ws_dep: либо строка версии, либо dict
                 if isinstance(ws_dep, str):
-                    new_val = f'"{ws_dep}"'
+                    if rest.strip():
+                        new_val = "{ version = " + f'"{ws_dep}"' + ", " + rest.strip().rstrip(",").strip() + " }"
+                    else:
+                        new_val = f'"{ws_dep}"'
                 else:
                     parts = []
                     if "version" in ws_dep:
@@ -162,8 +165,9 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                     if "default-features" in ws_dep:
                         parts.append(f'default-features = {str(ws_dep["default-features"]).lower()}')
                     if rest.strip():
-                        # сохраняем дополнительные поля из crate Cargo.toml
-                        pass
+                        # Сохраняем доп. поля из crate Cargo.toml (optional, default-features, features и т.п.)
+                        extra = rest.strip().rstrip(",").strip()
+                        parts.append(extra)
                     new_val = "{ " + ", ".join(parts) + " }"
                 out_lines.append(f'{indent}{dep} = {new_val}')
                 continue
