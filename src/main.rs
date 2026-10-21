@@ -7,6 +7,9 @@ use gpui_component::{GlobalState, WindowExt};
 use twrite::{Editor, focus_editor};
 use ::gpui::PathChoice;
 
+mod about_window;
+use about_window::AboutWindow;
+
 // --- Действия ---
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
 #[action(namespace = my_editor, no_json)]
@@ -258,6 +261,30 @@ impl RootView {
         let focus_handle = self.editor.read(cx).focus_handle.clone();
         focus_editor(&focus_handle, window, cx);
     }
+
+    fn on_about(&mut self, _: &About, _window: &mut Window, cx: &mut Context<Self>) {
+        let bounds = Bounds::centered(None, size(px(400.), px(200.)), cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            kind: WindowKind::Normal,
+            window_decorations: Some(WindowDecorations::Client),
+            titlebar: Some(TitleBar::title_bar_options()),
+            app_owns_titlebar_drag: true,
+            window_min_size: Some(size(px(300.), px(150.))),
+            ..Default::default()
+        };
+
+        let root_weak = cx.entity().downgrade();
+        gpui_kit::open_window(options, cx, move |_window, cx| {
+            let root_weak_cb = root_weak.clone();
+            let on_close: Box<dyn Fn(&mut Window, &mut App) + 'static> =
+                Box::new(move |_w, app| {
+                    let _ = root_weak_cb.update(app, |_root, _cx| {});
+                });
+            cx.new(|cx| AboutWindow::new(cx, on_close))
+        })
+        .ok();
+    }
 }
 
 impl Render for RootView {
@@ -276,6 +303,7 @@ impl Render for RootView {
             .on_action(cx.listener(Self::on_copy))
             .on_action(cx.listener(Self::on_paste))
             .on_action(cx.listener(Self::on_select_all))
+            .on_action(cx.listener(Self::on_about))
             .child(
                 TitleBar::new()
                     .h(px(32.))
@@ -350,7 +378,6 @@ fn main() {
             GlobalState::global_mut(cx).set_app_menus(owned_menus);
 
             cx.on_action(|_: &Quit, cx| cx.quit());
-            cx.on_action(|_: &About, _cx| println!("TWrite Editor v0.1.0"));
 
             let bounds = Bounds::centered(None, size(px(800.), px(600.)), cx);
             let options = WindowOptions {
