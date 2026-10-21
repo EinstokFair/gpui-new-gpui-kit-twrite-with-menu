@@ -131,7 +131,9 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
     lines = text.splitlines()
     in_deps_section = False
     out_lines = []
-    for line in lines:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         stripped = line.strip()
         if re.match(r'^\[.*dependencies.*\]', stripped):
             in_deps_section = True
@@ -139,6 +141,28 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
             in_deps_section = False
 
         if in_deps_section:
+            # G: склеить многострочную inline-таблицу `foo = { workspace = true, ... }`
+            # Начало: `foo = { workspace = true` без закрывающей `}` до конца строки.
+            m_open = re.match(r'^\s*[\w-]+\s*=\s*\{\s*workspace\s*=\s*true\b', line)
+            if m_open and "}" not in line[m_open.end():]:
+                buf = [line]
+                j = i + 1
+                found_close = False
+                while j < len(lines):
+                    buf.append(lines[j])
+                    if "}" in lines[j]:
+                        found_close = True
+                        break
+                    j += 1
+                if found_close:
+                    line = " ".join(s.strip() for s in buf)
+                    i = j  # перепрыгнуть потреблённые строки (следующий шаг — i += 1 ниже)
+                else:
+                    # не нашли закрывающую } — оставляем как было
+                    out_lines.append(line)
+                    i += 1
+                    continue
+
             # 2a. `foo = { workspace = true, ... }`
             m = re.match(r'^(\s*)([\w-]+)\s*=\s*\{\s*workspace\s*=\s*true\s*(.*?)\}\s*$', line)
             if m:
@@ -146,8 +170,8 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                 ws_dep = ws_deps.get(dep)
                 if ws_dep is None:
                     out_lines.append(line)
+                    i += 1
                     continue
-                # ws_dep: либо строка версии, либо dict
                 if isinstance(ws_dep, str):
                     base = {"version": ws_dep}
                     if rest.strip():
@@ -160,7 +184,6 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                     merged = dict(ws_dep)
                     if rest.strip():
                         extra = toml.loads("x = {" + rest.strip().strip(" ,") + "}")["x"]
-                        # features аддитивны: объединяем без дублей (workspace-порядок сохраняем)
                         ws_feats = list(merged.get("features", []))
                         for f in extra.get("features", []):
                             if f not in ws_feats:
@@ -169,9 +192,10 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                             merged["features"] = ws_feats
                         for k, v in extra.items():
                             if k != "features":
-                                merged[k] = v  # rest переопределяет workspace
+                                merged[k] = v
                     new_val = toml_value(merged)
                 out_lines.append(f'{indent}{dep} = {new_val}')
+                i += 1
                 continue
             # 2b. `foo.workspace = true`
             m = re.match(r'^(\s*)([\w-]+)\.workspace\s*=\s*true\s*$', line)
@@ -180,6 +204,7 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                 ws_dep = ws_deps.get(dep)
                 if ws_dep is None:
                     out_lines.append(line)
+                    i += 1
                     continue
                 if isinstance(ws_dep, str):
                     new_val = f'"{ws_dep}"'
@@ -194,8 +219,11 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                         parts.append(f'features = [{feats}]')
                     new_val = "{ " + ", ".join(parts) + " }"
                 out_lines.append(f'{indent}{dep} = {new_val}')
+                i += 1
                 continue
+
         out_lines.append(line)
+        i += 1
 
     text = "\n".join(out_lines)
 
