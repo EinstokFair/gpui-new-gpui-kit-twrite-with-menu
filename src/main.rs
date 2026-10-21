@@ -1,14 +1,16 @@
 use std::path::PathBuf;
 use ::gpui::*;
-use gpui_kit::*;
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::TitleBar;
-use gpui_component::{GlobalState, WindowExt};
-use twrite::{Editor, focus_editor};
+use gpui_component::{ActiveTheme, GlobalState, WindowExt};
+use gpui_kit::component::{Theme, ThemeMode};
+use twrite::{Editor, focus_editor, EditorTheme};
 use ::gpui::PathChoice;
 
 mod about_window;
+mod settings;
 use about_window::AboutWindow;
+use settings::ThemeKind;
 
 // --- Действия ---
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
@@ -17,6 +19,12 @@ struct Quit;
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
 #[action(namespace = my_editor, no_json)]
 struct About;
+#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
+#[action(namespace = my_editor, no_json)]
+struct SetLightTheme;
+#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
+#[action(namespace = my_editor, no_json)]
+struct SetDarkTheme;
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
 #[action(namespace = my_editor, no_json)]
 struct NewFile;
@@ -55,10 +63,57 @@ struct RootView {
     current_file: Option<PathBuf>,
 }
 
+fn light_editor_theme() -> EditorTheme {
+    let mut t = EditorTheme::default();
+    t.background = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0xfafafa));
+    t.foreground = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0x1f1f1f));
+    t.cursor = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0x0969da));
+    t.selection = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0xcce5ff));
+    t.search_match = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0xfff3c4));
+    t.line_number = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0x8a8a8a));
+    t.line_number_active = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0x1f1f1f));
+    t.menu_bg = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0xffffff));
+    t.menu_border = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0xd0d7de));
+    t.menu_hover = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0xeff2f5));
+    t.menu_fg = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0x1f1f1f));
+    t.menu_hint = EditorTheme::rgba_to_hsla(twrite::Rgba::hex(0x6e7781));
+    t
+}
+
+fn dark_editor_theme() -> EditorTheme {
+    EditorTheme::default()
+}
+
+fn editor_theme_for(kind: ThemeKind) -> EditorTheme {
+    match kind {
+        ThemeKind::Light => light_editor_theme(),
+        ThemeKind::Dark => dark_editor_theme(),
+    }
+}
+
+fn apply_theme(kind: ThemeKind, editor: &Entity<Editor>, cx: &mut App) {
+    match kind {
+        ThemeKind::Light => Theme::change(ThemeMode::Light, None, cx),
+        ThemeKind::Dark => Theme::change(ThemeMode::Dark, None, cx),
+    }
+    editor.update(cx, |ed, cx| {
+        ed.theme = editor_theme_for(kind);
+        cx.notify();
+    });
+}
+
 impl RootView {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let menu_bar = AppMenuBar::new(cx);
-        let editor = cx.new(|cx| Editor::new("Hello from TWrite + gpui-kit + menu!", cx));
+
+        // Стартовая тема: из настроек (иначе тёмная). Применяем к редактору сразу,
+        // чтобы не было рассинхрона со стартовой темой gpui-kit (её ставит main()).
+        let start_kind = settings::load_theme().unwrap_or(ThemeKind::Dark);
+        let editor = cx.new(|cx| {
+            let mut ed = Editor::new("Hello from TWrite + gpui-kit + menu!", cx);
+            ed.theme = editor_theme_for(start_kind);
+            ed
+        });
 
         let focus_handle = editor.read(cx).focus_handle.clone();
         focus_editor(&focus_handle, window, cx);
@@ -262,11 +317,23 @@ impl RootView {
         focus_editor(&focus_handle, window, cx);
     }
 
+    fn on_set_light_theme(&mut self, _: &SetLightTheme, _window: &mut Window, cx: &mut Context<Self>) {
+        apply_theme(ThemeKind::Light, &self.editor, cx);
+        settings::save_theme(ThemeKind::Light);
+        cx.notify();
+    }
+
+    fn on_set_dark_theme(&mut self, _: &SetDarkTheme, _window: &mut Window, cx: &mut Context<Self>) {
+        apply_theme(ThemeKind::Dark, &self.editor, cx);
+        settings::save_theme(ThemeKind::Dark);
+        cx.notify();
+    }
+
     fn on_about(&mut self, _: &About, _window: &mut Window, cx: &mut Context<Self>) {
         let bounds = Bounds::centered(None, size(px(400.), px(200.)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            kind: WindowKind::Normal,
+            kind: WindowKind::Dialog,
             window_decorations: Some(WindowDecorations::Client),
             titlebar: Some(TitleBar::title_bar_options()),
             app_owns_titlebar_drag: true,
@@ -303,6 +370,8 @@ impl Render for RootView {
             .on_action(cx.listener(Self::on_copy))
             .on_action(cx.listener(Self::on_paste))
             .on_action(cx.listener(Self::on_select_all))
+            .on_action(cx.listener(Self::on_set_light_theme))
+            .on_action(cx.listener(Self::on_set_dark_theme))
             .on_action(cx.listener(Self::on_about))
             .child(
                 TitleBar::new()
@@ -319,7 +388,7 @@ impl Render for RootView {
                     .items_center()
                     .px_2()
                     .h(px(30.))
-                    .bg(::gpui::white())
+                    .bg(cx.theme().background)
                     .border_b_1()
                     .child(self.menu_bar.clone())
             )
@@ -338,6 +407,18 @@ fn main() {
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx| {
             gpui_kit::init(cx);
+
+            // Стартовая тема gpui-kit: из настроек, иначе тёмная.
+            let start_theme = settings::load_theme().unwrap_or(ThemeKind::Dark);
+            Theme::change(
+                match start_theme {
+                    ThemeKind::Light => ThemeMode::Light,
+                    ThemeKind::Dark => ThemeMode::Dark,
+                },
+                None,
+                cx,
+            );
+
             let menus = vec![
                 gpui_kit::Menu {
                     name: SharedString::new_static("Файл"),
@@ -370,6 +451,9 @@ fn main() {
                     name: SharedString::new_static("Справка"),
                     disabled: false,
                     items: vec![
+                        gpui_kit::MenuItem::action("Светлая тема", SetLightTheme),
+                        gpui_kit::MenuItem::action("Тёмная тема", SetDarkTheme),
+                        gpui_kit::MenuItem::separator(),
                         gpui_kit::MenuItem::action("О программе", About),
                     ],
                 },
