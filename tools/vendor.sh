@@ -86,6 +86,82 @@ def find_existing_repo(url, cache_dir):
     return None
 
 
+def expand_workspace_sections(crate_dir: pathlib.Path, ws_deps: dict, ws_pkg: dict):
+    """Развернуть `workspace = true` внутри секций [<...>.dependencies.<name>]."""
+    crate_cargo = crate_dir / "Cargo.toml"
+    if not crate_cargo.exists():
+        return
+
+    text = crate_cargo.read_text()
+    lines = text.splitlines()
+    out = []
+    i = 0
+    changed = False
+
+    # Паттерн заголовка секции: [target.'...'.dependencies.<name>] / [dependencies.<name>] / ...
+    # Захватываем "<prefix>.<kind>.<name>" где kind = dependencies|dev-dependencies|build-dependencies
+    section_re = re.compile(
+        r'^\s*\[\s*([^\]]*?\.)?(dependencies|dev-dependencies|build-dependencies)\.([\w-]+)\s*\]\s*$'
+    )
+
+    while i < len(lines):
+        line = lines[i]
+        m = section_re.match(line)
+        if m:
+            prefix = (m.group(1) or "").rstrip('.')  # "target.'cfg(...)'" или ""
+            kind = m.group(2)
+            name = m.group(3)
+            ws_dep = ws_deps.get(name)
+            # Собираем тело секции до следующей [ или EOF
+            body = []
+            j = i + 1
+            while j < len(lines):
+                s = lines[j].strip()
+                if s.startswith("[") and s.endswith("]"):
+                    break
+                body.append(lines[j])
+                j += 1
+
+            if ws_dep is not None and any(l.strip() == "workspace = true" for l in body):
+                # Определяем, что рендерить из ws_dep
+                if isinstance(ws_dep, str):
+                    rendered = f'version = "{ws_dep}"'
+                else:
+                    rendered = toml_value(ws_dep)
+                # inline-строка вида: <name> = { version = "...", package = "...", ... }
+                inline = f'{rendered.strip("{} ").strip()}'
+                # Заменяем секцию на [<prefix>.<kind>] + <name> = { ... } + остальные строки body (кроме workspace = true)
+                header_kind = f"[{prefix + '.' if prefix else ''}{kind}]"
+                out.append(header_kind)
+                # inline может содержать "a = b, c = d" — оборачиваем в { }
+                out.append(f'{name} = {{ {inline} }}')
+                for l in body:
+                    if l.strip() == "workspace = true":
+                        continue
+                    if l.strip() == "":
+                        continue
+                    # остальные строки (optional = true и т.п.) — переносим как отдельную секцию-сосед? нельзя: это атрибуты inline
+                    # Простейший корректный вариант: если остались строки — оставляем секцию отдельно с повторным name,
+                    # но TOML не разрешает. Поэтому переносим их в inline через ", ".
+                    s = l.strip()
+                    if "=" in s:
+                        # добавить в inline перед "}": заменить последнюю "}"
+                        out[-1] = out[-1][:-2] + f', {s}' + ' }'
+                i = j
+                changed = True
+                continue
+            # не наша секция или нет workspace = true — оставляем как есть
+            out.append(line)
+            i += 1
+            continue
+        out.append(line)
+        i += 1
+
+    if changed:
+        crate_cargo.write_text("\n".join(out) + "\n")
+        print(f"  OK: развёрнуты секции с workspace = true в {crate_cargo.relative_to(crate_dir.parent.parent)}")
+
+
 def remap_path_dependencies(crate_dir: pathlib.Path, vendor_dir: pathlib.Path):
     """Заменить `path = "crates/<name>"` на `../<name>-local` для крейтов, уже присутствующих в vendor/."""
     crate_cargo = crate_dir / "Cargo.toml"
@@ -309,6 +385,11 @@ for c in crates:
         print(f"  OK: git → {dst}")
         # Разворачиваем workspace inheritance (repo_root — корень клона)
         expand_workspace_inheritance(dst, repo, name)
+        # Q3: разворачиваем workspace = true в секциях [<...>.dependencies.<name>]
+        _ws_root = toml.loads((repo / "Cargo.toml").read_text())
+        _ws_deps = (_ws_root.get("workspace", {}) or {}).get("dependencies", {}) or {}
+        _ws_pkg = (_ws_root.get("workspace", {}) or {}).get("package", {}) or {}
+        expand_workspace_sections(dst, _ws_deps, _ws_pkg)
 
     elif src == "generated":
         gen = vu / c["generator"]
