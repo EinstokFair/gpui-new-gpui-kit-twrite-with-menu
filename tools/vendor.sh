@@ -67,10 +67,30 @@ def toml_value(v):
     raise TypeError(f"unsupported TOML value: {v!r}")
 
 
+def find_existing_repo(url, cache_dir):
+    """Найти существующий клон по 4 шаблонам: <repo>, <owner>_<repo>, <repo>.git, <owner>_<repo>.git."""
+    parts = url.rstrip("/").replace(".git", "").split("/")
+    repo_name = parts[-1]
+    owner_name = parts[-2] if len(parts) >= 2 else ""
+    candidates = [
+        repo_name,
+        f"{owner_name}_{repo_name}",
+        f"{repo_name}.git",
+        f"{owner_name}_{repo_name}.git",
+    ]
+    for c in candidates:
+        cand = cache_dir / c
+        if cand.is_dir() and (cand / ".git").exists():
+            print(f"  found existing repo: {cand}")
+            return cand
+    return None
+
+
 def clone_git(url, rev, cache_dir):
-    name = url.rstrip("/").split("/")[-1].replace(".git", "")
-    repo = cache_dir / name
-    if not repo.exists():
+    repo = find_existing_repo(url, cache_dir)
+    if repo is None:
+        name = url.rstrip("/").split("/")[-1].replace(".git", "")
+        repo = cache_dir / name
         print(f"  git clone {url}")
         run(["git", "clone", "--quiet", url, str(repo)])
     subprocess.run(["git", "-C", str(repo), "fetch", "--depth", "1", "origin", rev],
