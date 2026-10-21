@@ -61,6 +61,7 @@ struct RootView {
     menu_bar: Entity<AppMenuBar>,
     editor: Entity<Editor>,
     current_file: Option<PathBuf>,
+    saved_version: usize,
 }
 
 fn light_editor_theme() -> EditorTheme {
@@ -115,7 +116,12 @@ impl RootView {
 
         let focus_handle = editor.read(cx).focus_handle.clone();
         focus_editor(&focus_handle, window, cx);
-        Self { menu_bar, editor, current_file: None }
+        let saved_version = editor.read(cx).buffer.version();
+        Self { menu_bar, editor, current_file: None, saved_version }
+    }
+
+    fn is_dirty(&self, cx: &App) -> bool {
+        self.editor.read(cx).buffer.version() != self.saved_version
     }
 
     fn get_text(&self, cx: &App) -> String {
@@ -136,6 +142,7 @@ impl RootView {
     fn on_new(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
         self.current_file = None;
         self.set_text(String::new(), window, cx);
+        self.saved_version = self.editor.read(cx).buffer.version();
     }
 
     fn on_open(&mut self, _: &OpenFile, window: &mut Window, cx: &mut Context<Self>) {
@@ -217,6 +224,7 @@ impl RootView {
             cx.notify();
         });
         self.current_file = Some(path);
+        self.saved_version = self.editor.read(cx).buffer.version();
         let focus_handle = self.editor.read(cx).focus_handle.clone();
         focus_editor(&focus_handle, window, cx);
     }
@@ -228,13 +236,43 @@ impl RootView {
                 println!("Ошибка сохранения: {}", e);
             } else {
                 println!("Сохранено: {:?}", path);
+                self.saved_version = self.editor.read(cx).buffer.version();
             }
         } else {
             self.on_save_as(&SaveFileAs, window, cx);
         }
     }
 
-    fn on_save_as(&mut self, _: &SaveFileAs, window: &mut Window, cx: &mut Context<Self>) {         let default_name = self.current_file.as_ref()             .and_then(|p| p.file_name())             .and_then(|n| n.to_str())             .map(|s| s.to_string())             .unwrap_or_else(|| "untitled.txt".to_string());          let picked = cx.prompt_for_new_path(             std::path::Path::new("."),             Some(&default_name),         );          cx.spawn_in(window, async move |this, cx| match picked.await {             Ok(Ok(Some(path))) => {                 _ = this.update_in(cx, |this, _window, cx| {                     let text = this.get_text(cx);                     if let Err(e) = std::fs::write(&path, text) {                         println!("Ошибка сохранения: {}", e);                     } else {                         this.current_file = Some(path);                         println!("Сохранено как: {:?}", this.current_file);                     }                 });             }             Ok(Err(err)) => println!("Ошибка выбора файла: {}", err),             _ => {}         })         .detach();     } 
+    fn on_save_as(&mut self, _: &SaveFileAs, window: &mut Window, cx: &mut Context<Self>) {
+        let default_name = self.current_file.as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "untitled.txt".to_string());
+
+        let picked = cx.prompt_for_new_path(
+            std::path::Path::new("."),
+            Some(&default_name),
+        );
+
+        cx.spawn_in(window, async move |this, cx| match picked.await {
+            Ok(Ok(Some(path))) => {
+                _ = this.update_in(cx, |this, _window, cx| {
+                    let text = this.get_text(cx);
+                    if let Err(e) = std::fs::write(&path, text) {
+                        println!("Ошибка сохранения: {}", e);
+                    } else {
+                        this.current_file = Some(path);
+                        this.saved_version = this.editor.read(cx).buffer.version();
+                        println!("Сохранено как: {:?}", this.current_file);
+                    }
+                });
+            }
+            Ok(Err(err)) => println!("Ошибка выбора файла: {}", err),
+            _ => {}
+        })
+        .detach();
+    }
 
     // --- Правка через TWrite ---
     fn on_undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
@@ -328,6 +366,14 @@ impl RootView {
 
 impl Render for RootView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let dirty = self.is_dirty(cx);
+        let title = match (&self.current_file, dirty) {
+            (Some(p), true) => format!("* {} — Редактор TWrite", p.to_string_lossy()),
+            (Some(p), false) => format!("{} — Редактор TWrite", p.to_string_lossy()),
+            (None, true) => "* Безымянный — Редактор TWrite".to_string(),
+            (None, false) => "Редактор TWrite".to_string(),
+        };
+
         div()
             .size_full()
             .flex()
@@ -349,9 +395,7 @@ impl Render for RootView {
                 TitleBar::new()
                     .h(px(32.))
                     .child(
-                        div().flex().flex_1().items_center().justify_center().child(
-                            self.current_file.as_ref().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "Редактор TWrite".to_string())
-                        )
+                        div().flex().flex_1().items_center().justify_center().child(title)
                     )
             )
             .child(
