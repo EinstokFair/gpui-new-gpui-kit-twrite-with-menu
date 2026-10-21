@@ -234,33 +234,7 @@ impl RootView {
         }
     }
 
-    fn on_save_as(&mut self, _: &SaveFileAs, window: &mut Window, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some("Сохранить как".into()),
-            ..Default::default()
-        });
-        cx.spawn_in(window, async move |this, cx| match picked.await {
-            Ok(Ok(Some((mut paths, _choices)))) => {
-                if let Some(path) = paths.pop() {
-                    _ = this.update_in(cx, |this, _window, cx| {
-                        let text = this.get_text(cx);
-                        if let Err(e) = std::fs::write(&path, text) {
-                            println!("Ошибка сохранения: {}", e);
-                        } else {
-                            this.current_file = Some(path);
-                            println!("Сохранено как: {:?}", this.current_file);
-                        }
-                    });
-                }
-            }
-            Ok(Err(err)) => println!("Ошибка выбора файла: {}", err),
-            _ => {}
-        })
-        .detach();
-    }
+    fn on_save_as(&mut self, _: &SaveFileAs, window: &mut Window, cx: &mut Context<Self>) {         let default_name = self.current_file.as_ref()             .and_then(|p| p.file_name())             .and_then(|n| n.to_str())             .map(|s| s.to_string())             .unwrap_or_else(|| "untitled.txt".to_string());          let picked = cx.prompt_for_new_path(             std::path::Path::new("."),             Some(&default_name),         );          cx.spawn_in(window, async move |this, cx| match picked.await {             Ok(Ok(Some(path))) => {                 _ = this.update_in(cx, |this, _window, cx| {                     let text = this.get_text(cx);                     if let Err(e) = std::fs::write(&path, text) {                         println!("Ошибка сохранения: {}", e);                     } else {                         this.current_file = Some(path);                         println!("Сохранено как: {:?}", this.current_file);                     }                 });             }             Ok(Err(err)) => println!("Ошибка выбора файла: {}", err),             _ => {}         })         .detach();     } 
 
     // --- Правка через TWrite ---
     fn on_undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<Self>) {
