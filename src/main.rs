@@ -74,6 +74,7 @@ struct RootView {
     pending_action: Option<PendingAction>,
     pending_save_result: Option<SaveResult>,
     root_window_handle: Option<gpui::AnyWindowHandle>,
+    save_dialog_open: bool,
 }
 
 fn light_editor_theme() -> EditorTheme {
@@ -156,6 +157,7 @@ impl RootView {
             pending_action: None,
             pending_save_result: None,
             root_window_handle: None,
+            save_dialog_open: false,
         }
     }
 
@@ -190,6 +192,10 @@ impl RootView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Защита от двойного открытия диалога (несколько крестиков/Alt+F4).
+        if self.save_dialog_open {
+            return;
+        }
         if !self.is_dirty(cx) {
             match action {
                 None => cx.quit(),
@@ -199,6 +205,7 @@ impl RootView {
         }
         self.pending_action = action;
         self.quit_after_save = action.is_none();
+        self.save_dialog_open = true;
 
         let bounds = Bounds::centered(None, size(px(500.), px(250.)), cx);
         let options = WindowOptions {
@@ -223,6 +230,7 @@ impl RootView {
                     let handle_opt = {
                         let mut out = None;
                         let _ = root_weak_save.update(app, |root, cx| {
+                            root.save_dialog_open = false;
                             root.pending_save_result = Some(SaveResult::ProceedToAction);
                             out = root.root_window_handle;
                             cx.notify();
@@ -248,6 +256,7 @@ impl RootView {
                     let handle_opt = {
                         let mut out = None;
                         let _ = root_weak_discard.update(app, |root, cx| {
+                            root.save_dialog_open = false;
                             root.pending_save_result = Some(SaveResult::DiscardAndProceed);
                             out = root.root_window_handle;
                             cx.notify();
@@ -267,7 +276,17 @@ impl RootView {
                         });
                     }
                 });
-            cx.new(|cx| SaveDialog::new(window, cx, on_save, on_discard))
+            let root_weak_cancel = root_weak.clone();
+            let on_cancel: Box<dyn Fn(&mut Window, &mut App) + 'static> =
+                Box::new(move |_w, app| {
+                    let _ = root_weak_cancel.update(app, |root, cx| {
+                        root.save_dialog_open = false;
+                        root.pending_action = None;
+                        root.quit_after_save = false;
+                        cx.notify();
+                    });
+                });
+            cx.new(|cx| SaveDialog::new(window, cx, on_save, on_discard, on_cancel))
         })
         .ok();
     }
@@ -427,6 +446,7 @@ impl RootView {
     }
 
     fn on_save(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_dialog_open = false;
         if let Some(path) = &self.current_file {
             let text = self.get_text(cx);
             // ВАЖНО: сохраняем всегда в UTF-8 — это осознанное решение.
@@ -459,6 +479,7 @@ impl RootView {
     }
 
     fn on_save_as(&mut self, _: &SaveFileAs, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_dialog_open = false;
         let default_name = self.current_file.as_ref()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
