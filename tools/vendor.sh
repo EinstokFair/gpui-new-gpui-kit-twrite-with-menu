@@ -248,15 +248,9 @@ def expand_workspace_inheritance(crate_dir: pathlib.Path, repo_root: pathlib.Pat
                 if isinstance(ws_dep, str):
                     new_val = f'"{ws_dep}"'
                 else:
-                    parts = []
-                    if "version" in ws_dep:
-                        parts.append(f'version = "{ws_dep["version"]}"')
-                    if "package" in ws_dep:
-                        parts.append(f'package = "{ws_dep["package"]}"')
-                    if "features" in ws_dep:
-                        feats = ", ".join(f'"{f}"' for f in ws_dep["features"])
-                        parts.append(f'features = [{feats}]')
-                    new_val = "{ " + ", ".join(parts) + " }"
+                    # N1: рендерим ВСЕ ключи ws_dep (включая path) через toml_value,
+                    # чтобы remap_path_dependencies мог потом заменить path = "crates/<name>"
+                    new_val = toml_value(ws_dep)
                 out_lines.append(f'{indent}{dep} = {new_val}')
                 i += 1
                 continue
