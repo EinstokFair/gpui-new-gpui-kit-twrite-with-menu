@@ -6,6 +6,14 @@ use gpui_kit::component::TitleBar;
 #[action(namespace = my_editor, no_json)]
 pub struct CloseSaveDialog;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CloseReason {
+    /// Пользователь выбрал действие (Сохранить / Не сохранять).
+    Action,
+    /// Пользователь отменил (Отмена / Esc / Alt+F4 / крестик окна).
+    Cancel,
+}
+
 pub struct SaveDialog {
     focus_handle: FocusHandle,
     on_save: Option<Box<dyn Fn(&mut Window, &mut App) + 'static>>,
@@ -28,7 +36,7 @@ impl SaveDialog {
         window.on_window_should_close(cx, move |window, cx| {
             if let Some(this) = this.upgrade() {
                 let _ = this.update(cx, |this, cx| {
-                    this.close_window(window, cx);
+                    this.close_window(window, cx, CloseReason::Cancel);
                 });
             }
             false
@@ -41,11 +49,13 @@ impl SaveDialog {
         }
     }
 
-    fn close_window(&mut self, window: &mut Window, cx: &mut App) {
-        // Если пользователь не нажал «Сохранить»/«Не сохранять» —
-        // значит, отмена (крестик/Esc/«Отмена»/Alt+F4).
-        if let Some(cb) = self.on_cancel.take() {
-            cb(window, cx);
+    fn close_window(&mut self, window: &mut Window, cx: &mut App, reason: CloseReason) {
+        // on_cancel срабатывает ТОЛЬКО при отмене.
+        // При «Сохранить»/«Не сохранять» — это действие, не отмена.
+        if matches!(reason, CloseReason::Cancel) {
+            if let Some(cb) = self.on_cancel.take() {
+                cb(window, cx);
+            }
         }
         window.remove_window();
     }
@@ -61,11 +71,11 @@ impl Render for SaveDialog {
             .flex_col()
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if event.keystroke.key == "escape" {
-                    this.close_window(window, cx);
+                    this.close_window(window, cx, CloseReason::Cancel);
                 }
             }))
             .on_action(cx.listener(|this, _: &CloseSaveDialog, window, cx| {
-                this.close_window(window, cx);
+                this.close_window(window, cx, CloseReason::Cancel);
             }))
             .child(
                 TitleBar::new()
@@ -106,7 +116,7 @@ impl Render for SaveDialog {
                                         if let Some(cb) = this.on_save.take() {
                                             cb(window, cx);
                                         }
-                                        this.close_window(window, cx);
+                                        this.close_window(window, cx, CloseReason::Action);
                                     }))
                             )
                             .child(
@@ -116,14 +126,14 @@ impl Render for SaveDialog {
                                         if let Some(cb) = this.on_discard.take() {
                                             cb(window, cx);
                                         }
-                                        this.close_window(window, cx);
+                                        this.close_window(window, cx, CloseReason::Action);
                                     }))
                             )
                             .child(
                                 Button::new("save-cancel")
                                     .label("Отмена")
                                     .on_click(cx.listener(|this, _, window, cx| {
-                                        this.close_window(window, cx);
+                                        this.close_window(window, cx, CloseReason::Cancel);
                                     }))
                             )
                     )
