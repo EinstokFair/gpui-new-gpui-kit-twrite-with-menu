@@ -18,6 +18,15 @@ use settings::ThemeKind;
 struct Quit;
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
 #[action(namespace = my_editor, no_json)]
+struct QuitSave;
+#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
+#[action(namespace = my_editor, no_json)]
+struct QuitDiscard;
+#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
+#[action(namespace = my_editor, no_json)]
+struct QuitCancel;
+#[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
+#[action(namespace = my_editor, no_json)]
 struct About;
 #[derive(Clone, PartialEq, Default, Debug, gpui_kit::Action)]
 #[action(namespace = my_editor, no_json)]
@@ -62,6 +71,7 @@ struct RootView {
     editor: Entity<Editor>,
     current_file: Option<PathBuf>,
     saved_version: usize,
+    quit_after_save: bool,
 }
 
 fn light_editor_theme() -> EditorTheme {
@@ -117,7 +127,14 @@ impl RootView {
         let focus_handle = editor.read(cx).focus_handle.clone();
         focus_editor(&focus_handle, window, cx);
         let saved_version = editor.read(cx).buffer.version();
-        Self { menu_bar, editor, current_file: None, saved_version }
+
+        Self {
+            menu_bar,
+            editor,
+            current_file: None,
+            saved_version,
+            quit_after_save: false,
+        }
     }
 
     fn is_dirty(&self, cx: &App) -> bool {
@@ -137,6 +154,42 @@ impl RootView {
         });
         let focus_handle = self.editor.read(cx).focus_handle.clone();
         focus_editor(&focus_handle, window, cx);
+    }
+
+    /// Единая точка выхода: спрашивает про несохранённые изменения,
+    /// затем сохраняет или выходит.
+    fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_dirty(cx) {
+            cx.quit();
+            return;
+        }
+
+        let this = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _, _| {
+            let this_ok = this.clone();
+            alert
+                .title("Несохранённые изменения")
+                .description("В документе есть несохранённые изменения. Сохранить перед выходом?")
+                .ok_text("Сохранить")
+                .cancel_text("Не сохранять")
+                .show_cancel(true)
+                .on_ok({
+                    let this_ok = this_ok.clone();
+                    move |_, window, cx| {
+                        if let Some(root) = this_ok.upgrade() {
+                            root.update(cx, |root, cx| {
+                                root.quit_after_save = true;
+                                root.on_save(&SaveFile, window, cx);
+                            });
+                        }
+                        true
+                    }
+                })
+                .on_cancel(|_, _, cx| {
+                    cx.quit();
+                    true
+                })
+        });
     }
 
     fn on_new(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
@@ -237,6 +290,9 @@ impl RootView {
             } else {
                 println!("Сохранено: {:?}", path);
                 self.saved_version = self.editor.read(cx).buffer.version();
+                if self.quit_after_save {
+                    cx.quit();
+                }
             }
         } else {
             self.on_save_as(&SaveFileAs, window, cx);
@@ -265,6 +321,9 @@ impl RootView {
                         this.current_file = Some(path);
                         this.saved_version = this.editor.read(cx).buffer.version();
                         println!("Сохранено как: {:?}", this.current_file);
+                        if this.quit_after_save {
+                            cx.quit();
+                        }
                     }
                 });
             }
@@ -339,6 +398,23 @@ impl RootView {
         cx.notify();
     }
 
+    fn on_quit(&mut self, _: &Quit, window: &mut Window, cx: &mut Context<Self>) {
+        self.request_quit(window, cx);
+    }
+
+    fn on_quit_save(&mut self, _: &QuitSave, window: &mut Window, cx: &mut Context<Self>) {
+        self.quit_after_save = true;
+        self.on_save(&SaveFile, window, cx);
+    }
+
+    fn on_quit_discard(&mut self, _: &QuitDiscard, _window: &mut Window, cx: &mut Context<Self>) {
+        cx.quit();
+    }
+
+    fn on_quit_cancel(&mut self, _: &QuitCancel, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.quit_after_save = false;
+    }
+
     fn on_about(&mut self, _: &About, _window: &mut Window, cx: &mut Context<Self>) {
         let bounds = Bounds::centered(None, size(px(400.), px(200.)), cx);
         let options = WindowOptions {
@@ -390,10 +466,24 @@ impl Render for RootView {
             .on_action(cx.listener(Self::on_select_all))
             .on_action(cx.listener(Self::on_set_light_theme))
             .on_action(cx.listener(Self::on_set_dark_theme))
+            .on_action(cx.listener(Self::on_quit))
+            .on_action(cx.listener(Self::on_quit_save))
+            .on_action(cx.listener(Self::on_quit_discard))
+            .on_action(cx.listener(Self::on_quit_cancel))
             .on_action(cx.listener(Self::on_about))
             .child(
                 TitleBar::new()
                     .h(px(32.))
+                    .on_close_window({
+                        let this = cx.entity().downgrade();
+                        move |_, window, cx| {
+                            if let Some(root) = this.upgrade() {
+                                root.update(cx, |root, cx| {
+                                    root.request_quit(window, cx);
+                                });
+                            }
+                        }
+                    })
                     .child(
                         div().flex().flex_1().items_center().justify_center().child(title)
                     )
@@ -489,8 +579,6 @@ fn main() {
             ];
             let owned_menus: Vec<_> = menus.into_iter().map(|m| m.owned()).collect();
             GlobalState::global_mut(cx).set_app_menus(owned_menus);
-
-            cx.on_action(|_: &Quit, cx| cx.quit());
 
             let bounds = Bounds::centered(None, size(px(800.), px(600.)), cx);
             let options = WindowOptions {
