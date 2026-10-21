@@ -18,3 +18,4 @@ twrite = { path = "vendor/twrite-local" }
 gpui = { path = "vendor/gpui-local" }
 gpui-pre = { path = "vendor/gpui-pre-local" }
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
+gpui-base = { path = "vendor/gpui-base-local" }

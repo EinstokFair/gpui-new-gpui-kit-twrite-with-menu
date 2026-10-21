@@ -8,8 +8,10 @@ use twrite::{Editor, focus_editor, EditorTheme};
 use ::gpui::PathChoice;
 
 mod about_window;
+mod save_dialog;
 mod settings;
 use about_window::{AboutWindow, CloseAbout};
+use save_dialog::{CloseSaveDialog, SaveDialog};
 use settings::ThemeKind;
 
 // --- Действия ---
@@ -128,6 +130,23 @@ impl RootView {
         focus_editor(&focus_handle, window, cx);
         let saved_version = editor.read(cx).buffer.version();
 
+        // Перехватываем системное закрытие окна (крестик, Alt+F4).
+        // Если есть несохранённые изменения — показываем SaveDialog и НЕ закрываем окно.
+        let this = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |window, cx| {
+            let Some(root) = this.upgrade() else { return true };
+            let dirty = root.read(cx).is_dirty(cx);
+            if dirty {
+                root.update(cx, |root, cx| {
+                    root.request_quit(window, cx);
+                });
+                false // не закрывать окно — диалог уже открыт
+            } else {
+                true // закрыть окно
+            }
+        });
+        
+
         Self {
             menu_bar,
             editor,
@@ -156,40 +175,46 @@ impl RootView {
         focus_editor(&focus_handle, window, cx);
     }
 
-    /// Единая точка выхода: спрашивает про несохранённые изменения,
-    /// затем сохраняет или выходит.
-    fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Единая точка выхода: открывает отдельное окно SaveDialog.
+    fn request_quit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if !self.is_dirty(cx) {
             cx.quit();
             return;
         }
 
-        let this = cx.entity().downgrade();
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let this_ok = this.clone();
-            alert
-                .title("Несохранённые изменения")
-                .description("В документе есть несохранённые изменения. Сохранить перед выходом?")
-                .ok_text("Сохранить")
-                .cancel_text("Не сохранять")
-                .show_cancel(true)
-                .on_ok({
-                    let this_ok = this_ok.clone();
-                    move |_, window, cx| {
-                        if let Some(root) = this_ok.upgrade() {
-                            root.update(cx, |root, cx| {
-                                root.quit_after_save = true;
-                                root.on_save(&SaveFile, window, cx);
-                            });
-                        }
-                        true
-                    }
-                })
-                .on_cancel(|_, _, cx| {
-                    cx.quit();
-                    true
-                })
-        });
+        let bounds = Bounds::centered(None, size(px(500.), px(250.)), cx);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            kind: WindowKind::Dialog,
+            window_decorations: Some(WindowDecorations::Client),
+            titlebar: Some(TitleBar::title_bar_options()),
+            app_owns_titlebar_drag: true,
+            window_min_size: Some(size(px(350.), px(150.))),
+            ..Default::default()
+        };
+
+        let root_weak = cx.entity().downgrade();
+        gpui_kit::open_window(options, cx, move |window, cx| {
+            let root_weak_save = root_weak.clone();
+            let root_weak_discard = root_weak.clone();
+            let on_save: Box<dyn Fn(&mut Window, &mut App) + 'static> =
+                Box::new(move |_w, app| {
+                    let _ = root_weak_save.update(app, |root, cx| {
+                        root.quit_after_save = true;
+                        // Вызываем on_save через тот же путь, что и меню
+                        let window = _w;
+                        root.on_save(&SaveFile, window, cx);
+                    });
+                });
+            let on_discard: Box<dyn Fn(&mut Window, &mut App) + 'static> =
+                Box::new(move |_w, app| {
+                    let _ = root_weak_discard.update(app, |_root, cx| {
+                        cx.quit();
+                    });
+                });
+            cx.new(|cx| SaveDialog::new(window, cx, on_save, on_discard))
+        })
+        .ok();
     }
 
     fn on_new(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
@@ -466,6 +491,7 @@ impl Render for RootView {
             .on_action(cx.listener(Self::on_select_all))
             .on_action(cx.listener(Self::on_set_light_theme))
             .on_action(cx.listener(Self::on_set_dark_theme))
+            .key_context("RootView")
             .on_action(cx.listener(Self::on_quit))
             .on_action(cx.listener(Self::on_quit_save))
             .on_action(cx.listener(Self::on_quit_discard))
@@ -526,6 +552,7 @@ fn main() {
 
             cx.bind_keys([
                 KeyBinding::new("secondary-s", SaveFile, None),
+                KeyBinding::new("alt-f4", Quit, None),
                 KeyBinding::new("secondary-shift-s", SaveFileAs, None),
                 KeyBinding::new("secondary-z", Undo, None),
                 KeyBinding::new("secondary-shift-z", Redo, None),
@@ -536,7 +563,18 @@ fn main() {
                 KeyBinding::new("secondary-n", NewFile, None),
                 KeyBinding::new("secondary-o", OpenFile, None),
                 KeyBinding::new("escape", CloseAbout, Some("AboutWindow")),
+                KeyBinding::new("escape", CloseSaveDialog, Some("SaveDialog")),
             ]);
+
+            cx.on_action(|_: &Quit, cx| {
+                if let Some(handle) = cx.active_window() {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        window.dispatch_action(Box::new(Quit), cx);
+                    });
+                } else {
+                    cx.quit();
+                }
+            });
 
             let menus = vec![
                 gpui_kit::Menu {
