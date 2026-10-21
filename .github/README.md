@@ -15,7 +15,7 @@ All dependencies are pinned by `rev` in `vendor-upstream/manifest.toml` and unpa
 
 ## Building
 
-See [BUILD.en.md](BUILD.en.md).
+See [BUILD.en.md](../BUILD.en.md).
 
 Quick start:
 
@@ -50,11 +50,11 @@ Quick start:
 3. `cargo xtask postprocess` — normalizes `vendor/` manifests (renames, `features` merge, `[patch.crates-io]`).
 4. `cargo build --release` — builds.
 
-Details — in [BUILD.en.md](BUILD.en.md).
+Details — in [BUILD.en.md](../BUILD.en.md).
 
 ## License
 
-GPLv3 — see [LICENSE](LICENSE).
+GPLv3 — see [LICENSE](../LICENSE).
 
 ## Third-party licenses
 

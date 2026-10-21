@@ -161,3 +161,17 @@ EOF
 
 echo "=== generated ==="
 ls -la README.en.md BUILD.en.md
+
+# ---------- .github/README.md (real file, ../ paths) ----------
+mkdir -p .github
+sed -e 's#](BUILD.en.md)#](../BUILD.en.md)#g' \
+    -e 's#](LICENSE)#](../LICENSE)#g' \
+    README.en.md > .github/README.md
+
+# ---------- README.en.md (symlink to .github/README.md) ----------
+rm -f README.en.md
+ln -s .github/README.md README.en.md
+
+echo "=== .github/README.md ==="
+ls -la .github/README.md
+readlink README.en.md || echo "(README.en.md — не симлинк)"
