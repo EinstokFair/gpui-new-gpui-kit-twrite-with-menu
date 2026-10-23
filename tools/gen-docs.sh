@@ -35,6 +35,29 @@ cat > README.md <<'EOF'
     tools/vendor.sh
     cargo build --release
 
+## Запуск
+
+    ./target/release/gpui-new-gpui-kit-twrite-editor [--encoding <метка>] [<файл>]
+
+Без аргументов — открывается пустой редактор с приветственным текстом.
+
+- `<файл>` — путь к файлу, который нужно открыть при старте. Если не указан, редактор стартует пустым.
+- `--encoding <метка>` — кодировка, в которой читать файл: `utf-8` (по умолчанию), `windows-1251`, `ibm866` и другие метки, понимаемые `encoding_rs`. На сохранение не влияет: файл всегда пишется в UTF-8.
+- `-h`, `--help` — показать справку и выйти.
+
+Примеры:
+
+    # открыть файл (UTF-8 по умолчанию)
+    ./target/release/gpui-new-gpui-kit-twrite-editor /tmp/notes.txt
+
+    # открыть файл в кодировке windows-1251
+    ./target/release/gpui-new-gpui-kit-twrite-editor --encoding windows-1251 /tmp/notes-cp1251.txt
+
+    # справка
+    ./target/release/gpui-new-gpui-kit-twrite-editor --help
+
+При ошибке чтения файла редактор не падает: сообщение уходит в stderr, окно открывается с пустым буфером.
+
 ## Структура
 
     src/                      — исходники приложения

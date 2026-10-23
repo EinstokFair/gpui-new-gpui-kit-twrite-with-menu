@@ -34,6 +34,29 @@ Quick start:
     tools/vendor.sh
     cargo build --release
 
+## Running
+
+    ./target/release/gpui-new-gpui-kit-twrite-editor [--encoding <label>] [<file>]
+
+With no arguments — opens an empty editor with a welcome text.
+
+- `<file>` — path to a file to open on startup. If omitted, the editor starts empty.
+- `--encoding <label>` — encoding used to read the file: `utf-8` (default), `windows-1251`, `ibm866`, and other labels understood by `encoding_rs`. It does not affect saving: files are always written as UTF-8.
+- `-h`, `--help` — print usage and exit.
+
+Examples:
+
+    # open a file (UTF-8 by default)
+    ./target/release/gpui-new-gpui-kit-twrite-editor /tmp/notes.txt
+
+    # open a file in windows-1251
+    ./target/release/gpui-new-gpui-kit-twrite-editor --encoding windows-1251 /tmp/notes-cp1251.txt
+
+    # usage
+    ./target/release/gpui-new-gpui-kit-twrite-editor --help
+
+If the file cannot be read, the editor does not crash: the message goes to stderr and the window opens with an empty buffer.
+
 ## Layout
 
     src/                      — application sources
@@ -162,16 +185,16 @@ EOF
 echo "=== generated ==="
 ls -la README.en.md BUILD.en.md
 
-# ---------- .github/README.md (real file, ../ paths) ----------
+# ---------- .github/README.md (symlink to ../README.en.md) ----------
+# README.en.md — реальный файл в корне; в .github/ кладём симлинк.
+# GitHub при показе репозитория сам подхватывает .github/README.md,
+# а относительные ссылки внутри него будут резолвиться от .github/,
+# поэтому в реальном файле оставляем пути БЕЗ ../, а в .github/ — симлинк
+# (GitHub резолвит симлинки и читает целевой файл, пути — от корня репо).
+rm -f .github/README.md
 mkdir -p .github
-sed -e 's#](BUILD.en.md)#](../BUILD.en.md)#g' \
-    -e 's#](LICENSE)#](../LICENSE)#g' \
-    README.en.md > .github/README.md
+ln -s ../README.en.md .github/README.md
 
-# ---------- README.en.md (symlink to .github/README.md) ----------
-rm -f README.en.md
-ln -s .github/README.md README.en.md
-
-echo "=== .github/README.md ==="
+echo "=== .github/README.md (symlink) ==="
 ls -la .github/README.md
-readlink README.en.md || echo "(README.en.md — не симлинк)"
+readlink .github/README.md || echo "(не симлинк)"
