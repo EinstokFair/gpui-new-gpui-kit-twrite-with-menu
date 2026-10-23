@@ -17,3 +17,5 @@
 *~
 .DS_Store
 tools/xtask/target/
+src/*.bak-*
+tools/*.bak-*
