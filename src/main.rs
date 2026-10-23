@@ -451,6 +451,34 @@ impl RootView {
         focus_editor(&focus_handle, window, cx);
     }
 
+    /// Открытие файла из CLI: без &mut Window, ошибки — в stderr.
+    /// Фокус ставится отдельно в main через AnyWindowHandle::update.
+    fn open_file_initial(&mut self, path: PathBuf, encoding: String, cx: &mut Context<Self>) {
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("Ошибка чтения файла {}: {}", path.display(), e);
+                return;
+            }
+        };
+        let encoding_ref = encoding_rs::Encoding::for_label(encoding.as_bytes())
+            .unwrap_or(encoding_rs::UTF_8);
+        let (decoded, _, had_errors) = encoding_ref.decode(&bytes);
+        if had_errors {
+            eprintln!("Не удалось декодировать файл {} как {}", path.display(), encoding);
+            return;
+        }
+        self.editor.update(cx, |ed, cx| {
+            let text = decoded.into_owned();
+            let len = ed.buffer.len_bytes();
+            ed.buffer.delete_range(0..len);
+            ed.buffer.insert(&text);
+            cx.notify();
+        });
+        self.current_file = Some(path);
+        self.saved_version = self.editor.read(cx).buffer.version();
+    }
+
     fn on_save(&mut self, _: &SaveFile, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(path) = &self.current_file {
             let text = self.get_text(cx);
@@ -710,7 +738,41 @@ impl Render for RootView {
 }
 
 
+fn parse_cli() -> Option<(PathBuf, String)> {
+    let mut args = std::env::args().skip(1);
+    let mut path: Option<PathBuf> = None;
+    let mut encoding = String::from("utf-8");
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                println!("Использование: gpui-new-gpui-kit-twrite-editor [--encoding <метка>] <файл>");
+                println!("  --encoding <метка>   кодировка открытия (utf-8, windows-1251, ibm866). По умолчанию utf-8");
+                println!("  -h, --help           эта справка");
+                std::process::exit(0);
+            }
+            "--encoding" => {
+                if let Some(v) = args.next() {
+                    encoding = v;
+                } else {
+                    eprintln!("--encoding требует аргумента");
+                    std::process::exit(2);
+                }
+            }
+            _ => {
+                if path.is_some() {
+                    eprintln!("Лишний аргумент: {}", arg);
+                    std::process::exit(2);
+                }
+                path = Some(PathBuf::from(arg));
+            }
+        }
+    }
+    path.map(|p| (p, encoding))
+}
+
 fn main() {
+    let cli_open_path = parse_cli();
+
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx| {
@@ -803,6 +865,18 @@ fn main() {
                 root.root_window_handle = Some(root_handle);
                 cx.notify();
             });
+
+            // CLI: открыть файл после создания окна.
+            if let Some((path, encoding)) = cli_open_path {
+                root_entity.update(cx, |root, cx| {
+                    root.open_file_initial(path, encoding, cx);
+                });
+                // Поставить фокус в редактор — уже с доступом к Window.
+                let fh = root_entity.read(cx).editor.read(cx).focus_handle.clone();
+                let _ = root_handle.update(cx, |_root, window, cx| {
+                    focus_editor(&fh, window, cx);
+                });
+            }
 
             cx.activate(true);
         });
