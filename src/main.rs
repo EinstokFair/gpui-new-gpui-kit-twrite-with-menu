@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use clap::Parser;
 use ::gpui::*;
 use gpui_kit::component::menu::AppMenuBar;
 use gpui_kit::component::TitleBar;
@@ -738,40 +739,27 @@ impl Render for RootView {
 }
 
 
-fn parse_cli() -> Option<(PathBuf, String)> {
-    let mut args = std::env::args().skip(1);
-    let mut path: Option<PathBuf> = None;
-    let mut encoding = String::from("utf-8");
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-h" | "--help" => {
-                println!("Использование: gpui-new-gpui-kit-twrite-editor [--encoding <метка>] <файл>");
-                println!("  --encoding <метка>   кодировка открытия (utf-8, windows-1251, ibm866). По умолчанию utf-8");
-                println!("  -h, --help           эта справка");
-                std::process::exit(0);
-            }
-            "--encoding" => {
-                if let Some(v) = args.next() {
-                    encoding = v;
-                } else {
-                    eprintln!("--encoding требует аргумента");
-                    std::process::exit(2);
-                }
-            }
-            _ => {
-                if path.is_some() {
-                    eprintln!("Лишний аргумент: {}", arg);
-                    std::process::exit(2);
-                }
-                path = Some(PathBuf::from(arg));
-            }
-        }
-    }
-    path.map(|p| (p, encoding))
+
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Файл для открытия
+    #[arg(value_name = "FILE")]
+    file: Option<PathBuf>,
+
+    /// Кодировка открытия (utf-8, windows-1251, ibm866)
+    #[arg(long, default_value = "utf-8")]
+    encoding: String,
+
+    /// Перейти к элементу с id=<якорь>
+    #[arg(long)]
+    id: Option<String>,
 }
 
 fn main() {
-    let cli_open_path = parse_cli();
+    let args = Args::parse();
+    let cli_open_path = args.file.map(|p| (p, args.encoding.clone(), args.id.clone()));
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
@@ -867,7 +855,7 @@ fn main() {
             });
 
             // CLI: открыть файл после создания окна.
-            if let Some((path, encoding)) = cli_open_path {
+            if let Some((path, encoding, id)) = cli_open_path {
                 root_entity.update(cx, |root, cx| {
                     root.open_file_initial(path, encoding, cx);
                 });
@@ -876,6 +864,22 @@ fn main() {
                 let _ = root_handle.update(cx, |_root, window, cx| {
                     focus_editor(&fh, window, cx);
                 });
+                // Если задан --id — найти строку с id="..." и поставить курсор
+                if let Some(anchor) = id {
+                    root_entity.update(cx, |root, cx| {
+                        let text = root.get_text(cx);
+                        let needle = format!("id=\"{}\"", anchor);
+                        if let Some(pos) = text.find(&needle) {
+                            let line_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                            root.editor.update(cx, |ed, cx| {
+                                ed.selection = Some(twrite::Selection::range(line_start, line_start));
+                                cx.notify();
+                            });
+                        } else {
+                            eprintln!("Якорь id=\"{}\" не найден", anchor);
+                        }
+                    });
+                }
             }
 
             cx.activate(true);

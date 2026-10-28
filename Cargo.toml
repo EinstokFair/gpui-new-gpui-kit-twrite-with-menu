@@ -10,6 +10,7 @@ encoding_rs = "0.8"
 gpui-kit = { path = "vendor/gpui-kit-local" }
 gpui = { path = "vendor/gpui-local", features = ["wayland", "x11"] }
 gpui_platform = { package = "gpui-pre-platform", version = "0.3.9", features = ["wayland", "x11"] }
+clap = { version = "4.6.7", features = ["derive"] }
 
 [patch.crates-io]
 twrite-gpui = { path = "vendor/twrite-gpui-local" }
